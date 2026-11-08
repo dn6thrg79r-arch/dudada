@@ -6,15 +6,16 @@ export async function openPdf(
   onTask?: (task: PDFDocumentLoadingTask) => void,
 ): Promise<{ task: PDFDocumentLoadingTask; document: PDFDocumentProxy }> {
   const pdfjs = await import("pdfjs-dist");
-  pdfjs.GlobalWorkerOptions.workerSrc = "/pdfjs/pdf.worker.min.mjs";
+  const assets = `${process.env.NEXT_PUBLIC_BASE_PATH || ""}/pdfjs`;
+  pdfjs.GlobalWorkerOptions.workerSrc = `${assets}/pdf.worker.min.mjs`;
   const url = URL.createObjectURL(file);
   const task = pdfjs.getDocument({
     url,
     password,
-    cMapUrl: "/pdfjs/cmaps/",
+    cMapUrl: `${assets}/cmaps/`,
     cMapPacked: true,
-    standardFontDataUrl: "/pdfjs/standard_fonts/",
-    wasmUrl: "/pdfjs/wasm/",
+    standardFontDataUrl: `${assets}/standard_fonts/`,
+    wasmUrl: `${assets}/wasm/`,
     rangeChunkSize: 1024 * 1024,
   });
   onTask?.(task);

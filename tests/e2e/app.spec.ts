@@ -3,7 +3,7 @@ import { writeFile, readFile } from "node:fs/promises";
 import { pdfFixture } from "./pdf-fixture";
 import { encryptedPdf } from "./encrypted-fixture";
 async function openPdf(page: Page) {
-  await page.goto("/");
+  await page.goto("./");
   await page.getByLabel("PDF 파일 선택").setInputFiles({
     name: "병원소식_8페이지.pdf",
     mimeType: "application/pdf",
@@ -169,7 +169,7 @@ test("스캔·암호·손상 PDF, 100MB 이상의 선택 페이지 렌더링", a
   page,
 }, info) => {
   test.setTimeout(120000);
-  await page.goto("/");
+  await page.goto("./");
   await page.getByLabel("PDF 파일 선택").setInputFiles({
     name: "스캔.pdf",
     mimeType: "application/pdf",
@@ -258,7 +258,7 @@ test("TXT·Markdown 가져오기와 내보내기, 스마트폰 탭·iPad 배치"
 test("이전 버전 자료를 지우지 않고 실제 입력 글을 필사로 복원한다", async ({
   page,
 }) => {
-  await page.goto("/__legacy_seed__");
+  await page.goto("./__legacy_seed__");
   await page.evaluate(
     () =>
       new Promise<void>((resolve, reject) => {
@@ -289,7 +289,7 @@ test("이전 버전 자료를 지우지 않고 실제 입력 글을 필사로 �
         };
       }),
   );
-  await page.goto("/");
+  await page.goto("./");
   await expect(editor(page)).toHaveValue("내가 입력했던 필사");
   await page.getByRole("button", { name: "설정", exact: true }).click();
   await expect(

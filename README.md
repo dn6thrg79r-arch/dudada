@@ -4,6 +4,32 @@
 
 왼쪽에는 실제 PDF 원본, 오른쪽에는 빈 필사 문서를 보여줍니다. 신문형 PDF의 단·사진·제목·표는 원래 모양 그대로 유지됩니다. 속도·정확도·점수·정답 비교·자동 문장 진행은 없습니다. 계정이나 유료 API, 별도 데이터베이스도 필요 없습니다.
 
+## GitHub Pages로 공개 웹주소 만들기 (권장)
+
+Pages용 정적 빌드와 **Deploy GitHub Pages** 워크플로를 추가했습니다. 코드 push만으로는 공개 배포하지 않으며, 아래에서 사용자가 직접 실행합니다.
+
+1. GitHub 저장소 **Settings → General → Default branch**에서 기본 브랜치를 **`feat/pdf-transcription`**으로 지정합니다. 현재 기본 브랜치에 워크플로가 없으면 Actions의 수동 실행 목록에 나타나지 않기 때문에 필요합니다. 이 설정은 저장소 관리자가 변경할 수 있습니다.
+2. **Settings → Pages → Build and deployment → Source**를 **GitHub Actions**로 선택합니다. GitHub Free에서 저장소를 Public으로 해야 Pages를 사용할 수 있는 경우 **Settings → General → Danger Zone → Change repository visibility**에서 변경합니다. 공개 전 저장소에 올린 파일을 확인하세요. 앱에 선택한 PDF/필사는 저장소에 올라가지 않습니다.
+3. **Actions → Deploy GitHub Pages → Run workflow**에서 **`feat/pdf-transcription`**을 선택하고 실행합니다.
+4. 빌드·테스트·배포가 모두 초록색 체크가 되면 아래 주소를 엽니다.
+
+**예상 배포 주소: https://dn6thrg79r-arch.github.io/dudada/**
+
+이 주소는 실제 배포가 성공해야 열립니다. 이 코드 수정만으로 GitHub Pages 설정을 변경하거나 공개 배포를 실행한 것은 아닙니다. 수정 후 다시 배포할 때도 같은 Actions 워크플로를 실행하면 됩니다. 환경 보호 규칙으로 승인이 필요하면 Actions 화면에서 승인합니다.
+
+PDF worker·CMap·폰트·WASM과 Next.js 스크립트가 `/dudada/` 하위에서 동작하도록 구성했습니다. `out/.nojekyll`도 생성합니다. 서버/API 없이 정적 파일만 배포합니다. PDF와 필사는 계속 브라우저에서만 처리합니다. 기존 다른 사이트 주소의 브라우저 저장 자료는 새 Pages 주소로 자동 이동하지 않으므로 TXT/Markdown으로 옮기세요.
+
+개발자가 Pages 빌드를 로컬에서 확인하려면:
+
+```sh
+npm ci
+npm run build:pages
+npm run preview:pages
+# 브라우저에서 http://127.0.0.1:3102/dudada/ 열기
+```
+
+자동 브라우저 검사: `npm run test:pages` (앞서 Pages 빌드 필요). 저장소 이름을 바꾸거나 커스텀 도메인의 루트에 배포하는 경우 빌드/미리보기/검사에 동일한 `PAGES_BASE_PATH`를 지정합니다. 기본값은 `/dudada`, 루트 배포는 빈 문자열입니다. Pages 워크플로는 저장소 이름으로 경로를 설정합니다.
+
 ## 처음 실행하기 (Mac)
 
 1. [Node.js 공식 사이트](https://nodejs.org/ko)에서 **24 LTS**를 설치합니다.
@@ -120,3 +146,7 @@ Vitest는 페이지 연결/고정, 글 보존, TXT/Markdown 내보내기, 파일
 - Chromium: 개발 서버 **7개**, 별도 프로덕션 서버 **7개 통과**.
 - 한글 파일명 8페이지 합성 PDF, 101MB 이상 합성 PDF, 원본 렌더링/자유 입력/페이지별 복원/재연결/내보내기, 이전 자료 보존을 확인했습니다.
 - macOS/iPad/iPhone의 실제 Safari는 미검증입니다. WebKit 테스트도 시도했으나 실행 파일이 설치되지 않아 브라우저 시작 단계에서 실행되지 않았습니다. 이전 환경의 WebKit 다운로드는 허용 도메인 정책으로 차단됐으며, 이 작업에서 네트워크 정책은 변경하지 않았습니다.
+
+### GitHub Pages 변경 검증 (2026-11-08)
+
+린트·타입 검사·단위 테스트 7개·Pages 정적 빌드가 통과했습니다. `/dudada/` 경로의 정적 HTTP 서버에서 Chromium E2E 7개가 통과했고, PDF worker 로딩과 필사·저장·새로고침 복원·내보내기를 확인했습니다. 실제 GitHub Actions 배포와 공개 주소 접속은 아직 실행하지 않았습니다.

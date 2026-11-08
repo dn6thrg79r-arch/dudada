@@ -11,7 +11,10 @@
     "test": "vitest run",
     "test:e2e": "playwright test",
     "postinstall": "node scripts/pdf-assets.mjs",
-    "format": "prettier --write app lib tests scripts *.ts *.mjs *.json README.md"
+    "format": "prettier --write app lib tests scripts *.ts *.mjs *.json README.md",
+    "build:pages": "node scripts/build-pages.mjs",
+    "preview:pages": "node scripts/serve-pages.mjs",
+    "test:pages": "node scripts/test-pages.mjs"
   },
   "dependencies": {
     "idb": "^8.0.0",
