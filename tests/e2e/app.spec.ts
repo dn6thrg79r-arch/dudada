@@ -1,231 +1,313 @@
-import { test, expect } from "@playwright/test";
-import { writeFile } from "node:fs/promises";
+import { test, expect, type Page } from "@playwright/test";
+import { writeFile, readFile } from "node:fs/promises";
+import { pdfFixture } from "./pdf-fixture";
 import { encryptedPdf } from "./encrypted-fixture";
-import { PDFDocument, StandardFonts, PDFName, PDFDict } from "pdf-lib";
-async function pdfFixture(blank = false, large = false) {
-  const doc = await PDFDocument.create();
-  const font = await doc.embedFont(StandardFonts.Helvetica);
-  const cmap = `/CIDInit /ProcSet findresource begin\n12 dict begin\nbegincmap\n/CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def\n/CMapName /Dudada def\n/CMapType 2 def\n1 begincodespacerange\n<00> <FF>\nendcodespacerange\n6 beginbfchar\n<41> <AC04>\n<42> <D638>\n<43> <C0AC>\n<58> <0049>\n<59> <0043>\n<5A> <0055>\nendbfchar\nendcmap\nCMapName currentdict /CMap defineresource pop\nend\nend`;
-  for (let i = 1; i <= 8; i++) {
-    const page = doc.addPage([600, 800]);
-    if (!blank) {
-      page.drawText(`ABC 12 (XYZ).`, { x: 40, y: 700, font, size: 16 });
-      page.drawText(`Page ${i}`, { x: 40, y: 650, font, size: 12 });
-    }
-  }
-  await font.embed();
-  const stream = doc.context.register(doc.context.flateStream(cmap));
-  doc.context.lookup(font.ref, PDFDict).set(PDFName.of("ToUnicode"), stream);
-  if (large)
-    doc.context.register(doc.context.stream(new Uint8Array(101 * 1024 * 1024)));
-  return Buffer.from(await doc.save());
-}
-async function pasteMaterial(page: import("@playwright/test").Page) {
+async function openPdf(page: Page) {
   await page.goto("/");
-  await page.getByRole("button", { name: "텍스트 붙여넣기" }).click();
-  await page.getByLabel("자료 제목", { exact: true }).fill("의학 암기노트");
-  await page
-    .getByLabel("학습할 글")
-    .fill("간호사 12명 (ICU). 다음 문장입니다.");
-  await page.getByRole("button", { name: "글 다듬기", exact: true }).click();
-}
-test("붙여넣기 → IME 조합 → 오타 수정 → 자동 이동 → 새로고침 복원 → 오답", async ({
-  page,
-}) => {
-  await pasteMaterial(page);
-  await page.getByRole("button", { name: "타자연습 시작" }).click();
-  const input = page.getByRole("textbox", { name: "타자 입력" });
-  await input.focus();
-  await input.dispatchEvent("compositionstart");
-  await input.fill("ㄱ");
-  await input.dispatchEvent("compositionupdate", { data: "ㄱ" });
-  await expect(
-    page.getByText("한글을 조합하고 있어요… 조합이 끝난 뒤 비교합니다."),
-  ).toBeVisible();
-  await expect(page.locator(".stats")).toContainText("100%");
-  await input.fill("간호사");
-  await input.dispatchEvent("compositionend", { data: "간호사" });
-  await expect(page.locator(".stats")).toContainText("100%");
-  await input.fill("간호사 13명 (ICU).");
-  await expect(page.locator(".incorrect")).toHaveCount(1);
-  await page.getByLabel("자동 다음 문장").uncheck();
-  await input.fill("간호사 12명 (ICU).");
-  await expect(page.getByText("문장을 정확히 완성했어요.")).toBeVisible();
-  await expect(page.locator(".stats")).toContainText("100%");
-  await page.getByRole("button", { name: "다음 문장" }).click();
-  await input.fill("다음");
-  await expect(page.getByRole("status").last()).toHaveText(
-    "이 브라우저에 저장됨",
-  );
-  await page.reload();
-  await page.getByRole("button", { name: "이어서 공부하기" }).click();
-  await expect(input).toHaveValue("다음");
-  await input.fill("다음 문장입니다.");
-  await expect(
-    page.getByRole("heading", { name: "오늘도 두다다, 잘했어요." }),
-  ).toBeVisible();
-  await expect(page.locator(".wrong-list")).toContainText("간호사 12명 (ICU).");
-  await page.getByRole("button", { name: "오답 다시 연습" }).click();
-  await expect(input).toHaveValue("");
-  await expect(page.locator(".target")).toHaveText("간호사 12명 (ICU).");
-});
-test("한글 파일명 8페이지 PDF → 3페이지 편집/부분 선택 → 저장 후 복원", async ({
-  page,
-}) => {
-  await page.goto("/");
-  const requests: string[] = [];
-  page.on("request", (r) => {
-    if (r.method() === "POST") requests.push(r.url());
-  });
   await page.getByLabel("PDF 파일 선택").setInputFiles({
-    name: "병원소식지_8페이지.pdf",
+    name: "병원소식_8페이지.pdf",
     mimeType: "application/pdf",
     buffer: await pdfFixture(),
   });
-  await expect(page.getByText(/총 8페이지/)).toBeVisible();
-  await page.getByRole("button", { name: "글자 추출하기" }).click();
   await expect(
-    page.getByRole("heading", { name: "내가 기억할 문장만 골라요." }),
+    page.getByRole("img", { name: "PDF 원본 1페이지", exact: true }),
   ).toBeVisible();
-  await expect(
-    page.getByRole("button", { name: "8페이지", exact: true }),
-  ).toBeVisible();
-  await page.getByRole("button", { name: "3페이지", exact: true }).click();
-  const text = page.getByRole("textbox", { name: "3페이지 텍스트" });
-  await expect(text).toHaveValue(/간호사 12 \(ICU\)\./);
-  await expect(page.getByLabel("PDF 원본 3페이지")).toBeVisible();
-  await text.fill("연구 결과는 12%입니다. ICU (3명)입니다!");
-  await text.focus();
-  await text.press("Home");
-  for (let i = 0; i < 15; i++) await text.press("Shift+ArrowRight");
-  await expect(
-    page.getByRole("button", { name: "선택한 글만 새 자료로 만들기" }),
-  ).toBeEnabled();
-  await page
-    .getByRole("button", { name: "선택한 글만 새 자료로 만들기" })
-    .click();
-  await expect(page.getByLabel("자료 제목", { exact: true })).toHaveValue(
-    /선택한 글/,
-  );
-  await page
-    .getByRole("button", { name: "학습자료 저장", exact: true })
-    .click();
-  await expect(page.getByRole("status").last()).toHaveText(/저장됨/);
-  await page.reload();
-  await expect(page.locator(".material")).toHaveCount(2);
-  await page.getByRole("button", { name: "이어서 공부하기" }).first().click();
-  await expect(page.locator(".page-heading")).toContainText("원문 3페이지");
-  const target = await page.locator(".target").innerText();
-  await page.getByRole("textbox", { name: "타자 입력" }).fill(target);
-  await expect(
-    page.getByRole("heading", { name: "오늘도 두다다, 잘했어요." }),
-  ).toBeVisible();
-  expect(requests).toEqual([]);
-});
-test("텍스트 없는 PDF, 손상 파일, 암호 필요 파일을 안내한다", async ({
+}
+const editor = (page: Page) =>
+  page.getByRole("textbox", { name: "필사 편집기" });
+async function saved(page: Page) {
+  await expect(page.locator(".save-state")).toContainText("자동 저장됨");
+}
+test("PDF 원본 + 빈 편집기 → 자유 입력 → 확대·스크롤·페이지별 저장 → 복원·재연결·내보내기", async ({
   page,
 }) => {
+  const posts: string[] = [];
+  page.on("request", (r) => {
+    if (r.method() === "POST") posts.push(r.url());
+  });
+  await openPdf(page);
+  await expect(editor(page)).toHaveValue("");
+  const text =
+    "연구 기사 정독  ICU (12명).\n\n내 생각과 원문의 문장을 자유롭게 씁니다.";
+  await editor(page).fill(text);
+  await saved(page);
+  const node = await editor(page).elementHandle();
+  await page.getByLabel("PDF 확대 비율").selectOption("200");
+  await expect(
+    page.getByRole("img", { name: "PDF 원본 1페이지", exact: true }),
+  ).toBeVisible();
+  await editor(page).focus();
+  await editor(page).evaluate((el) => {
+    el.scrollTop = 14;
+  });
+  await page.getByLabel("PDF 스크롤 영역").evaluate((el) => {
+    el.scrollTop = 400;
+    el.scrollLeft = 80;
+  });
+  await expect(editor(page)).toBeFocused();
+  await expect(editor(page)).toHaveValue(text);
+  expect(
+    await node?.evaluate((el) => el === document.querySelector(".manuscript")),
+  ).toBe(true);
+  await page.getByRole("button", { name: "다음 페이지", exact: true }).click();
+  await expect(editor(page)).toHaveValue("");
+  await editor(page).fill("2페이지의 자유로운 기록");
+  await page.getByRole("button", { name: "이전 페이지", exact: true }).click();
+  await expect(editor(page)).toHaveValue(text);
+  await saved(page);
+  await page.reload();
+  await expect(editor(page)).toHaveValue(text);
+  await expect(
+    page.getByRole("button", { name: "원본 PDF 다시 연결" }),
+  ).toBeVisible();
+  await expect(page.getByLabel("PDF 확대 비율")).toHaveValue("200");
+  await page.getByRole("button", { name: "원본 PDF 다시 연결" }).click();
+  await page.getByLabel("PDF 파일 선택").setInputFiles({
+    name: "병원소식_8페이지.pdf",
+    mimeType: "application/pdf",
+    buffer: await pdfFixture(),
+  });
+  await expect(
+    page.getByRole("img", { name: "PDF 원본 1페이지", exact: true }),
+  ).toBeVisible();
+  await expect(editor(page)).toHaveValue(text);
+  await page.locator(".export-menu summary").click();
+  const download = page.waitForEvent("download");
+  await page
+    .getByRole("button", { name: "모든 페이지 TXT", exact: true })
+    .click();
+  const f = await download;
+  const output = await readFile((await f.path())!, "utf8");
+  expect(output).toContain(text);
+  expect(output).toContain("2페이지의 자유로운 기록");
+  expect(posts).toEqual([]);
+});
+test("페이지 연결 해제·분할 드래그·글씨 크기를 저장한다", async ({ page }) => {
+  await openPdf(page);
+  await editor(page).fill("참고하며 쓰는 글");
+  await page.getByRole("button", { name: "설정", exact: true }).click();
+  await page.getByLabel("PDF 페이지에 맞춰 필사 전환").uncheck();
+  await page.getByLabel("편집기 글씨 크기").selectOption("26");
+  await page.getByRole("button", { name: "닫기", exact: true }).click();
+  await page.getByRole("button", { name: "다음 페이지", exact: true }).click();
+  await expect(editor(page)).toHaveValue("참고하며 쓰는 글");
+  await expect(page.getByLabel("필사 페이지", { exact: true })).toHaveValue(
+    "1",
+  );
+  const handle = page.getByRole("separator", { name: "좌우 영역 크기 조절" });
+  const box = (await handle.boundingBox())!;
+  await page.mouse.move(box.x + 4, box.y + 100);
+  await page.mouse.down();
+  await page.mouse.move(box.x - 100, box.y + 100);
+  await page.mouse.up();
+  expect(+(await handle.getAttribute("aria-valuenow"))!).toBeLessThan(55);
+  await saved(page);
+  await page.reload();
+  await expect(editor(page)).toHaveValue("참고하며 쓰는 글");
+  await expect(editor(page)).toHaveCSS("font-size", "26px");
+  await expect(page.getByLabel("현재 PDF 페이지")).toHaveValue("2");
+  await expect(page.getByLabel("필사 페이지", { exact: true })).toHaveValue(
+    "1",
+  );
+});
+test("한글 조합, 네이티브 실행 취소·다시 실행, 편집기 DOM과 커서 유지", async ({
+  page,
+}) => {
+  await openPdf(page);
+  const el = editor(page);
+  await expect(el).toHaveAttribute("spellcheck", "false");
+  await el.focus();
+  await el.dispatchEvent("compositionstart");
+  await el.fill("ㅎ");
+  await el.dispatchEvent("compositionupdate", { data: "ㅎ" });
+  await el.fill("한글 필사");
+  await el.dispatchEvent("compositionend", { data: "한글 필사" });
+  await expect(el).toHaveValue("한글 필사");
+  await saved(page);
+  await el.press("End");
+  await page.keyboard.insertText(" 자유");
+  await el.press("ControlOrMeta+z");
+  await expect(el).toHaveValue("한글 필사");
+  await el.press("ControlOrMeta+Shift+z");
+  await expect(el).toHaveValue("한글 필사 자유");
+  const node = await el.elementHandle();
+  await page.getByRole("button", { name: "PDF 확대", exact: true }).click();
+  expect(
+    await node?.evaluate((n) => n === document.querySelector(".manuscript")),
+  ).toBe(true);
+  await expect(el).toHaveValue("한글 필사 자유");
+});
+test("저장 실패를 표시하고 재시도로 복구한다", async ({ page }) => {
+  await openPdf(page);
+  await saved(page);
+  await page.evaluate(() => {
+    const original = IDBObjectStore.prototype.put;
+    Object.assign(window, {
+      restoreStore: () => {
+        IDBObjectStore.prototype.put = original;
+      },
+    });
+    IDBObjectStore.prototype.put = function () {
+      throw new DOMException("quota", "QuotaExceededError");
+    };
+  });
+  await editor(page).fill("저장에 실패해도 화면에 남는 글");
+  await expect(
+    page.getByRole("alert").filter({ hasText: "자동 저장에 실패" }),
+  ).toBeVisible();
+  await expect(page.locator(".save-state")).toContainText("저장 실패");
+  await expect(editor(page)).toHaveValue("저장에 실패해도 화면에 남는 글");
+  await page.evaluate(() => {
+    (window as unknown as { restoreStore: () => void }).restoreStore();
+  });
+  await page.getByRole("button", { name: "저장 재시도" }).click();
+  await saved(page);
+  await page.reload();
+  await expect(editor(page)).toHaveValue("저장에 실패해도 화면에 남는 글");
+});
+test("스캔·암호·손상 PDF, 100MB 이상의 선택 페이지 렌더링", async ({
+  page,
+}, info) => {
+  test.setTimeout(120000);
   await page.goto("/");
   await page.getByLabel("PDF 파일 선택").setInputFiles({
     name: "스캔.pdf",
     mimeType: "application/pdf",
     buffer: await pdfFixture(true),
   });
-  await page.getByRole("button", { name: "글자 추출하기" }).click();
-  await expect(page.locator("main [role=alert]")).toContainText(
-    "글자 인식(OCR)이 필요합니다",
-  );
   await expect(
-    page.getByRole("button", { name: /한국어·영어 OCR/ }),
-  ).toBeDisabled();
-  await page.getByRole("button", { name: "내 공부방", exact: true }).click();
-  await page.getByLabel("PDF 파일 선택").setInputFiles({
-    name: "손상.pdf",
-    mimeType: "application/pdf",
-    buffer: Buffer.from("broken pdf"),
-  });
-  await expect(page.locator("main [role=alert]")).toContainText("손상");
-});
-test("TXT 불러오기와 모바일 화면의 가로 넘침 방지", async ({ page }) => {
-  await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto("/");
-  await page.getByLabel("TXT 파일 선택").setInputFiles({
-    name: "암기노트.txt",
-    mimeType: "text/plain",
-    buffer: Buffer.from("환자 3명.\n의학용어 ICU."),
-  });
-  await expect(
-    page.getByRole("textbox", { name: "1페이지 텍스트" }),
-  ).toHaveValue("환자 3명.\n의학용어 ICU.");
-  await page.getByRole("button", { name: "타자연습 시작" }).click();
-  expect(
-    await page.evaluate(
-      () => document.documentElement.scrollWidth <= window.innerWidth,
-    ),
-  ).toBe(true);
-  await page.getByRole("button", { name: "어두운 화면" }).click();
-  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
-});
-
-test("암호가 걸린 PDF는 암호 입력 후 다시 열린다", async ({ page }) => {
-  await page.goto("/");
+    page.getByRole("img", { name: "PDF 원본 1페이지", exact: true }),
+  ).toBeVisible();
+  await editor(page).fill("이미지 PDF도 자유롭게 필사");
   await page.getByLabel("PDF 파일 선택").setInputFiles({
     name: "암호.pdf",
     mimeType: "application/pdf",
     buffer: Buffer.from(encryptedPdf, "base64"),
   });
-  await expect(page.locator("main [role=alert]")).toContainText("암호");
-  await page.getByLabel("PDF 암호 (필요한 경우)").fill("study123");
-  await page.getByRole("button", { name: "파일 다시 열기" }).click();
-  await expect(page.getByText(/총 1페이지/)).toBeVisible();
-  await page.getByRole("button", { name: "글자 추출하기" }).click();
   await expect(
-    page.getByRole("textbox", { name: "1페이지 텍스트" }),
-  ).toHaveValue(/ICU 12 patients/);
-});
-test("100MB 이상 PDF에서 진행률과 페이지 범위 추출", async ({
-  page,
-}, testInfo) => {
-  test.setTimeout(120000);
-  await page.goto("/");
-  const path = testInfo.outputPath("큰소식지.pdf");
+    page
+      .locator("main [role=alert], .notice[role=alert]")
+      .filter({ hasText: "암호" }),
+  ).toBeVisible();
+  await page.getByLabel("PDF 암호", { exact: true }).fill("study123");
+  await page.getByRole("button", { name: "다시 열기", exact: true }).click();
+  await expect(page.locator(".document-name")).toContainText("암호.pdf");
+  await expect(page.getByLabel("PDF 파일 선택")).toBeEnabled();
+  await page.getByLabel("PDF 파일 선택").setInputFiles({
+    name: "손상.pdf",
+    mimeType: "application/pdf",
+    buffer: Buffer.from("broken"),
+  });
+  await expect(
+    page.locator(".notice[role=alert]").filter({ hasText: "손상" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "취소", exact: true }).click();
+  const path = info.outputPath("큰신문.pdf");
   await writeFile(path, await pdfFixture(false, true));
   await page.getByLabel("PDF 파일 선택").setInputFiles(path);
   await expect(
-    page.getByText("100MB 이상 파일입니다.", { exact: false }),
+    page.getByRole("img", { name: "PDF 원본 1페이지", exact: true }),
   ).toBeVisible();
-  await expect(page.getByText(/총 8페이지/)).toBeVisible();
-  await page.getByLabel("추출할 페이지", { exact: true }).fill("3");
-  await page.getByRole("button", { name: "글자 추출하기" }).click();
+  await page.getByLabel("현재 PDF 페이지").selectOption("8");
   await expect(
-    page.getByRole("textbox", { name: "3페이지 텍스트" }),
-  ).toHaveValue(/간호사/);
-  await expect(
-    page.getByRole("button", { name: "8페이지", exact: true }),
-  ).toHaveCount(0);
+    page.getByRole("img", { name: "PDF 원본 8페이지", exact: true }),
+  ).toBeVisible();
+  await expect(page.locator("canvas")).toHaveCount(1);
+  await editor(page).fill("큰 PDF도 필사");
+  await saved(page);
 });
-
-test("iPad 가로·세로 배치와 일시정지", async ({ page }, testInfo) => {
-  await pasteMaterial(page);
-  await page.getByRole("button", { name: "타자연습 시작" }).click();
+test("TXT·Markdown 가져오기와 내보내기, 스마트폰 탭·iPad 배치", async ({
+  page,
+}, info) => {
+  await openPdf(page);
+  await page.getByLabel("필사 파일 불러오기", { exact: true }).setInputFiles({
+    name: "기존필사.md",
+    mimeType: "text/markdown",
+    buffer: Buffer.from("## 나의 필사\n\n한국어와 ICU 12명."),
+  });
+  await expect(editor(page)).toHaveValue("## 나의 필사\n\n한국어와 ICU 12명.");
   for (const size of [
     { width: 1024, height: 768 },
     { width: 768, height: 1024 },
-    { width: 390, height: 844 },
   ]) {
     await page.setViewportSize(size);
+    await expect(editor(page)).toBeVisible();
+    await expect(page.getByLabel("PDF 스크롤 영역")).toBeVisible();
     expect(
       await page.evaluate(
         () => document.documentElement.scrollWidth <= innerWidth,
       ),
     ).toBe(true);
   }
-  await page.getByRole("button", { name: "잠깐 멈춤" }).click();
-  await expect(page.getByRole("textbox", { name: "타자 입력" })).toBeDisabled();
-  await page.getByRole("button", { name: "계속하기", exact: true }).click();
-  await expect(page.getByRole("textbox", { name: "타자 입력" })).toBeEnabled();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.getByLabel("PDF 스크롤 영역")).toBeVisible();
+  await page.getByRole("button", { name: "필사하기", exact: true }).click();
+  await expect(editor(page)).toBeVisible();
+  await expect(page.getByLabel("PDF 스크롤 영역")).toBeHidden();
   await page.screenshot({
-    path: testInfo.outputPath("mobile-practice.png"),
+    path: info.outputPath("mobile.png"),
     fullPage: true,
   });
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.screenshot({
+    path: info.outputPath("desktop.png"),
+    fullPage: true,
+  });
+});
+
+test("이전 버전 자료를 지우지 않고 실제 입력 글을 필사로 복원한다", async ({
+  page,
+}) => {
+  await page.goto("/__legacy_seed__");
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve, reject) => {
+        const request = indexedDB.open("dudada-study", 1);
+        request.onupgradeneeded = () =>
+          request.result.createObjectStore("materials", { keyPath: "id" });
+        request.onerror = () => reject(request.error);
+        request.onsuccess = () => {
+          const db = request.result;
+          const tx = db.transaction("materials", "readwrite");
+          tx.objectStore("materials").put({
+            id: "old",
+            title: "이전 공부",
+            source: "소식.pdf",
+            pageCount: 8,
+            mode: "study",
+            updated: "2026-11-08T00:00:00Z",
+            pages: [{ number: 1, text: "추출 후 편집했던 원문" }],
+            records: {
+              "study:1:0": { input: "내가 입력했던 필사" },
+              "exact:1:0": { input: "다른 모드" },
+            },
+          });
+          tx.oncomplete = () => {
+            db.close();
+            resolve();
+          };
+        };
+      }),
+  );
+  await page.goto("/");
+  await expect(editor(page)).toHaveValue("내가 입력했던 필사");
+  await page.getByRole("button", { name: "설정", exact: true }).click();
+  await expect(
+    page.getByRole("button", { name: "이전 버전 편집 글 내려받기" }),
+  ).toBeVisible();
+  const original = await page.evaluate(
+    () =>
+      new Promise<unknown>((resolve, reject) => {
+        const r = indexedDB.open("dudada-study", 2);
+        r.onerror = () => reject(r.error);
+        r.onsuccess = () => {
+          const db = r.result;
+          const tx = db.transaction("materials");
+          const read = tx.objectStore("materials").get("old");
+          read.onsuccess = () => resolve(read.result.pages[0].text);
+          tx.oncomplete = () => db.close();
+        };
+      }),
+  );
+  expect(original).toBe("추출 후 편집했던 원문");
 });

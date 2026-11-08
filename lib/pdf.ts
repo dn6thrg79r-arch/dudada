@@ -1,62 +1,4 @@
 import type { PDFDocumentLoadingTask, PDFDocumentProxy } from "pdfjs-dist";
-export type Glyph = {
-  str: string;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-};
-// Cluster at line-start gaps, then order columns from left to right. Wide headings
-// remain separate; newspaper layouts still require the editor's manual review.
-export function readingOrder(items: Glyph[], columns = 1): string {
-  const usable = items.filter((i) => i.str.trim());
-  if (!usable.length) return "";
-  const min = Math.min(...usable.map((i) => i.x)),
-    max = Math.max(...usable.map((i) => i.x + i.width));
-  const bins: Glyph[][] = Array.from({ length: columns }, () => []);
-  for (const i of usable)
-    bins[
-      Math.min(
-        columns - 1,
-        Math.max(
-          0,
-          Math.floor(((i.x - min) / Math.max(1, max - min)) * columns),
-        ),
-      )
-    ].push(i);
-  return bins
-    .map((bin) => {
-      const lines: { y: number; height: number; items: Glyph[] }[] = [];
-      for (const item of bin.sort((a, b) => b.y - a.y || a.x - b.x)) {
-        const line = lines.find(
-          (l) =>
-            Math.abs(l.y - item.y) <
-            Math.max(2, Math.min(l.height, item.height) * 0.45),
-        );
-        if (line) line.items.push(item);
-        else lines.push({ y: item.y, height: item.height, items: [item] });
-      }
-      return lines
-        .sort((a, b) => b.y - a.y)
-        .map((l) =>
-          l.items
-            .sort((a, b) => a.x - b.x)
-            .map((i, n, arr) => {
-              const prev = arr[n - 1];
-              return (
-                (prev &&
-                i.x - (prev.x + prev.width) > Math.max(1, i.height * 0.15)
-                  ? " "
-                  : "") + i.str
-              );
-            })
-            .join(""),
-        )
-        .join("\n");
-    })
-    .filter(Boolean)
-    .join("\n\n");
-}
 export async function openPdf(
   file: File,
   password: string,
@@ -88,32 +30,6 @@ export async function openPdf(
     throw e;
   } finally {
     URL.revokeObjectURL(url);
-  }
-}
-export async function extractPage(
-  doc: PDFDocumentProxy,
-  number: number,
-  columns: number,
-): Promise<{ text: string; glyphs: Glyph[] }> {
-  const page = await doc.getPage(number);
-  try {
-    const content = await page.getTextContent();
-    const glyphs = content.items.flatMap((i) =>
-      "str" in i
-        ? [
-            {
-              str: i.str,
-              x: i.transform[4],
-              y: i.transform[5],
-              width: i.width,
-              height: i.height || 10,
-            },
-          ]
-        : [],
-    );
-    return { text: readingOrder(glyphs, columns), glyphs };
-  } finally {
-    page.cleanup();
   }
 }
 export function pdfError(error: unknown) {

@@ -3,7 +3,7 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "두다다 공부방 · PDF로 시작하는 필사",
   description:
-    "PDF와 암기노트를 나만의 한국어 타자연습으로. 파일은 브라우저에서 안전하게 처리합니다.",
+    "PDF 원문을 읽으며 내 속도로 필사하는 집중형 공부방. 파일과 필사는 브라우저에만 머뭅니다.",
 };
 export default function RootLayout({
   children,

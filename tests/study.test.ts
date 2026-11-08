@@ -1,70 +1,80 @@
 import { describe, it, expect } from "vitest";
 import {
-  compare,
-  clean,
-  createMaterial,
-  sentences,
-  parseRange,
-  cpm,
-} from "../lib/study";
-import { readingOrder } from "../lib/pdf";
-describe("한국어 학습 도구", () => {
-  it("Unicode 정규화와 숫자, 약어, 괄호를 비교한다", () => {
-    expect(
-      compare("간호사 12명 (ICU).", "간호사 12명 (ICU).".normalize("NFD"))
-        .complete,
-    ).toBe(true);
-    expect(compare("환자 3명", "환자 4명").accuracy).toBe(80);
+  createNotebook,
+  turnPage,
+  exportNotebook,
+  matchesPdf,
+  SaveQueue,
+} from "../lib/notebook";
+describe("자유 필사", () => {
+  it("55/45, 19px, 빈 필사로 시작한다", () => {
+    const n = createNotebook("병원소식.pdf", 8);
+    expect(n.split).toBe(55);
+    expect(n.fontSize).toBe(19);
+    expect(n.drafts).toEqual({});
   });
-  it("오타 삭제·수정 후 정확도를 회복한다", () => {
-    expect(compare("간호", "가노").accuracy).toBe(0);
-    expect(compare("간호", "간").accuracy).toBe(100);
-    expect(compare("간호", "간호").complete).toBe(true);
-    expect(compare("간호", "간호사").complete).toBe(false);
+  it("연결된 페이지를 이동해도 각 페이지 글을 보존한다", () => {
+    const n = createNotebook("소식.pdf", 8);
+    n.drafts = { "1": "간호  ICU\n\n자유 필사", "2": "둘째" };
+    const next = turnPage(n, 2);
+    expect(next.editorPage).toBe(2);
+    expect(turnPage(next, 1).drafts["1"]).toBe(n.drafts["1"]);
   });
-  it("문장부호와 원문 페이지를 유지한다", () => {
-    const m = createMaterial("노트", [
-      { number: 3, text: "연구 결과는 12%입니다. ICU (3명)입니다!" },
-    ]);
-    expect(sentences(m).map((s) => s.text)).toEqual([
-      "연구 결과는 12%입니다.",
-      "ICU (3명)입니다!",
-    ]);
-    expect(sentences(m)[0].page).toBe(3);
-    m.mode = "exact";
-    m.pages[0].text = "첫째  줄\n둘째 줄";
-    expect(sentences(m)[0].text).toBe("첫째  줄");
+  it("페이지 연결을 끄면 참고 페이지로 이동해도 편집 페이지를 유지한다", () => {
+    const n = { ...createNotebook("소식.pdf", 8), followPage: false };
+    expect(turnPage(n, 4).editorPage).toBe(1);
+    expect(turnPage(n, 99).pdfPage).toBe(8);
   });
-  it("범위를 검증하고 중복을 제거한다", () => {
-    expect(parseRange("1-3, 3, 8", 8)).toEqual([1, 2, 3, 8]);
-    expect(() => parseRange("0-4", 8)).toThrow();
-    expect(() => parseRange("3-2", 8)).toThrow();
-    expect(() => parseRange("1-9", 8)).toThrow();
+  it("모든 필사를 숫자 페이지 순서로 내보내고 공백과 줄바꿈을 보존한다", () => {
+    const n = createNotebook("필사.pdf", 12);
+    n.drafts = { "10": "마지막", "2": "두  칸\n\n문단", "1": "처음" };
+    const text = exportNotebook(n);
+    expect(text.indexOf("2페이지")).toBeLessThan(text.indexOf("10페이지"));
+    expect(text).toContain("두  칸\n\n문단");
+    expect(exportNotebook(n, true)).toContain("## 2페이지");
   });
-  it("줄바꿈 정리와 CPM을 계산한다", () => {
-    expect(clean("가  나\n다\n\n라")).toBe("가 나 다\n\n라");
-    expect(cpm(120, 60000)).toBe(120);
-    expect(cpm(10, 0)).toBe(0);
+  it("파일명만 같고 PDF 식별자가 다른 파일을 연결하지 않는다", () => {
+    const n = createNotebook("a.pdf", 8, "original", 100);
+    expect(matchesPdf(n, "a.pdf", 100, "other", 8)).toBe(false);
+    expect(matchesPdf(n, "이름변경.pdf", 100, "original", 8)).toBe(true);
   });
-  it("두 단을 왼쪽 단부터 읽는다", () => {
-    const glyphs = [
-      { str: "오른쪽 위", x: 300, y: 700, width: 80, height: 10 },
-      { str: "왼쪽 아래", x: 20, y: 680, width: 80, height: 10 },
-      { str: "왼쪽 위", x: 20, y: 700, width: 80, height: 10 },
-      { str: "오른쪽 아래", x: 300, y: 680, width: 80, height: 10 },
-    ];
-    expect(readingOrder(glyphs, 2)).toBe(
-      "왼쪽 위\n왼쪽 아래\n\n오른쪽 위\n오른쪽 아래",
+  it("저장이 끝나기 전에는 저장 완료로 표시하지 않는다", async () => {
+    const states: string[] = [];
+    const writes: number[] = [];
+    let release: () => void = () => {};
+    const q = new SaveQueue<number>(
+      (n) =>
+        new Promise<void>((r) => {
+          writes.push(n);
+          release = r;
+        }),
+      (s) => states.push(s),
     );
+    const first = q.enqueue(1);
+    await Promise.resolve();
+    q.enqueue(2);
+    release();
+    await first;
+    await Promise.resolve();
+    expect(states).not.toContain("saved");
+    release();
+    await q.flush();
+    expect(writes).toEqual([1, 2]);
+    expect(states.at(-1)).toBe("saved");
   });
-  it("장문을 누락 없이 나눈다", () => {
-    const text = "가".repeat(400);
-    const m = createMaterial("장문", [{ number: 1, text }]);
-    expect(sentences(m).every((s) => s.text.length <= 160)).toBe(true);
-    expect(
-      sentences(m)
-        .map((s) => s.text)
-        .join(""),
-    ).toBe(text);
+  it("저장 실패를 표시하고 재시도한다", async () => {
+    const states: string[] = [];
+    let fail = true;
+    const q = new SaveQueue(
+      async () => {
+        if (fail) throw new Error("quota");
+      },
+      (s) => states.push(s),
+    );
+    await q.enqueue("글");
+    expect(states.at(-1)).toBe("error");
+    fail = false;
+    await q.enqueue("글");
+    expect(states.at(-1)).toBe("saved");
   });
 });
