@@ -208,6 +208,8 @@ input:not([type="file"]):not([type="checkbox"]) {
   max-width: 96px;
 }
 .save-state {
+  inline-size: 100px;
+  flex: 0 0 100px;
   font-size: 10px;
   color: var(--muted);
   display: flex;

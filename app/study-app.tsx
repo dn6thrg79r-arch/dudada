@@ -9,7 +9,7 @@ import {
   Plus,
   Maximize,
   Download,
-  Check,
+  Save,
   Settings,
   Sun,
   Moon,
@@ -46,9 +46,10 @@ export default function StudyApp() {
     [library, setLibrary] = useState(false),
     [mobileTab, setMobileTab] = useState<"pdf" | "editor">("pdf"),
     [dark, setDark] = useState(false),
-    [composing, setComposing] = useState(false),
     [password, setPassword] = useState(""),
     [retryFile, setRetryFile] = useState<File | null>(null);
+  // Keep IME guards in event handlers; disabled toggles flash the toolbar per syllable.
+  const composing = useRef(false);
   const failedSaves = useRef(new Set<string>());
   const current = useRef<Notebook | null>(null),
     queue = useRef<SaveQueue<Notebook> | null>(null),
@@ -123,6 +124,11 @@ export default function StudyApp() {
     };
   }, []);
   function update(change: Partial<Notebook>) {
+    if (
+      composing.current &&
+      (change.editorPage !== undefined || change.pdfPage !== undefined)
+    )
+      return;
     const previous = current.current;
     if (!previous) return;
     const next = { ...previous, ...change, updated: new Date().toISOString() };
@@ -146,6 +152,7 @@ export default function StudyApp() {
     } catch {}
   }
   function choose(relink = false) {
+    if (composing.current) return;
     reconnect.current = relink;
     picker.current?.click();
   }
@@ -226,7 +233,7 @@ export default function StudyApp() {
     }
   }
   function navigate(page: number) {
-    if (composing) return;
+    if (composing.current) return;
     const n = current.current;
     if (!n) return;
     update(turnPage(n, page));
@@ -264,7 +271,7 @@ export default function StudyApp() {
         type="file"
         accept="application/pdf,.pdf"
         aria-label="PDF 파일 선택"
-        disabled={!ready || busy || composing}
+        disabled={!ready || busy}
         onChange={(e) => {
           const file = e.target.files?.[0];
           if (file) void load(file);
@@ -282,7 +289,7 @@ export default function StudyApp() {
         </a>
         <div className="header-actions">
           <button
-            disabled={!ready || busy || composing}
+            disabled={!ready || busy}
             className="primary"
             onClick={() => choose()}
           >
@@ -293,7 +300,7 @@ export default function StudyApp() {
             aria-label="내 필사 자료"
             aria-expanded={library}
             onClick={() => setLibrary(!library)}
-            disabled={!ready || composing}
+            disabled={!ready}
           >
             <FolderOpen size={18} />
           </button>
@@ -370,7 +377,7 @@ export default function StudyApp() {
               <button
                 className="shelf-item"
                 key={n.id}
-                disabled={composing || busy}
+                disabled={busy}
                 onClick={() => {
                   activate(n);
                   setLibrary(false);
@@ -421,7 +428,7 @@ export default function StudyApp() {
             <input
               type="checkbox"
               checked={note?.followPage ?? true}
-              disabled={!note || composing}
+              disabled={!note}
               onChange={(e) =>
                 update({
                   followPage: e.target.checked,
@@ -453,7 +460,7 @@ export default function StudyApp() {
             <div className="page-controls">
               <button
                 aria-label="이전 페이지"
-                disabled={note.pdfPage <= 1 || composing}
+                disabled={note.pdfPage <= 1}
                 onClick={() => navigate(note.pdfPage - 1)}
               >
                 <ChevronLeft size={18} />
@@ -463,7 +470,6 @@ export default function StudyApp() {
                 <select
                   aria-label="현재 PDF 페이지"
                   value={note.pdfPage}
-                  disabled={composing}
                   onChange={(e) => navigate(+e.target.value)}
                 >
                   {Array.from({ length: note.pageCount }, (_, i) => (
@@ -476,7 +482,7 @@ export default function StudyApp() {
               </label>
               <button
                 aria-label="다음 페이지"
-                disabled={note.pdfPage >= note.pageCount || composing}
+                disabled={note.pdfPage >= note.pageCount}
                 onClick={() => navigate(note.pdfPage + 1)}
               >
                 <ChevronRight size={18} />
@@ -542,18 +548,32 @@ export default function StudyApp() {
                 <Maximize size={16} />
               </button>
             </div>
-            <div className={`save-state ${save}`} role="status">
-              {save === "saving" ? (
-                "저장 중…"
-              ) : save === "saved" ? (
-                <>
-                  <Check size={13} /> 자동 저장됨
-                </>
-              ) : save === "error" ? (
-                "저장 실패"
-              ) : (
-                "저장 준비 중"
-              )}
+            <div
+              className={`save-state${save === "error" ? " error" : ""}`}
+              data-save-state={save}
+              role="status"
+              aria-live="off"
+              title={
+                save === "saved"
+                  ? "자동 저장됨"
+                  : save === "saving"
+                    ? "저장 중…"
+                    : save === "error"
+                      ? "저장 실패"
+                      : "저장 준비 중"
+              }
+            >
+              <Save size={13} aria-hidden="true" />
+              <span>{save === "error" ? "저장 실패" : "자동 저장"}</span>
+              <span className="sr-only">
+                {save === "saved"
+                  ? "자동 저장됨"
+                  : save === "saving"
+                    ? "저장 중…"
+                    : save === "idle"
+                      ? "저장 준비 중"
+                      : ""}
+              </span>
             </div>
             <details className="export-menu">
               <summary>
@@ -623,7 +643,7 @@ export default function StudyApp() {
                     </p>
                     <button
                       className="primary"
-                      disabled={busy || composing}
+                      disabled={busy}
                       onClick={() => choose(true)}
                     >
                       원본 PDF 다시 연결
@@ -682,7 +702,7 @@ export default function StudyApp() {
                     <span className="sr-only">필사 페이지</span>
                     <select
                       aria-label="필사 페이지"
-                      disabled={composing || note.followPage}
+                      disabled={note.followPage}
                       value={note.editorPage}
                       onChange={(e) => update({ editorPage: +e.target.value })}
                     >
@@ -699,7 +719,9 @@ export default function StudyApp() {
                 key={`${note.id}:${note.editorPage}:${importRevision}`}
                 initial={note.drafts[note.editorPage] || ""}
                 fontSize={note.fontSize}
-                onComposition={setComposing}
+                onComposition={(active) => {
+                  composing.current = active;
+                }}
                 onInput={(text) => {
                   const n = current.current;
                   if (n)
@@ -714,7 +736,6 @@ export default function StudyApp() {
                     type="file"
                     accept=".txt,.md,text/plain,text/markdown"
                     aria-label="필사 파일 불러오기"
-                    disabled={composing}
                     onChange={async (e) => {
                       const f = e.target.files?.[0];
                       e.target.value = "";

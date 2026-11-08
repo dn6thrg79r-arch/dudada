@@ -311,3 +311,57 @@ test("이전 버전 자료를 지우지 않고 실제 입력 글을 필사로 �
   );
   expect(original).toBe("추출 후 편집했던 원문");
 });
+
+test("한글을 연속 입력해도 상단 버튼과 도구줄이 반짝이거나 움직이지 않는다", async ({
+  page,
+}) => {
+  await openPdf(page);
+  await saved(page);
+  const area = editor(page);
+  await area.focus();
+  const header = page.locator(".app-header"),
+    toolbar = page.locator(".document-toolbar");
+  const headerImage = await header.screenshot(),
+    toolbarImage = await toolbar.screenshot();
+  const headerBox = await header.boundingBox(),
+    toolbarBox = await toolbar.boundingBox();
+  const canvas = await page.locator("canvas").elementHandle();
+  const input = await area.elementHandle();
+  // Delayed storage makes the in-flight state observable; the indicator must remain neutral and stable.
+  await page.evaluate(() => {
+    const original = IDBObjectStore.prototype.put;
+    IDBObjectStore.prototype.put = function (
+      ...args: Parameters<IDBObjectStore["put"]>
+    ) {
+      const started = performance.now();
+      while (performance.now() - started < 25) {}
+      return original.apply(this, args);
+    };
+  });
+  for (const value of ["ㅎ", "한", "한ㄱ", "한글", "한글 ㅍ", "한글 필사"]) {
+    await area.dispatchEvent("compositionstart");
+    await area.fill(value);
+    await area.dispatchEvent("compositionupdate", { data: value.at(-1) });
+    await expect(
+      page.getByRole("button", { name: "PDF 불러오기", exact: true }),
+    ).toBeEnabled();
+    await expect(
+      page.getByRole("button", { name: "다음 페이지", exact: true }),
+    ).toBeEnabled();
+    expect(await header.screenshot()).toEqual(headerImage);
+    expect(await toolbar.screenshot()).toEqual(toolbarImage);
+    await area.dispatchEvent("compositionend", { data: value.at(-1) });
+  }
+  await saved(page);
+  expect(await header.boundingBox()).toEqual(headerBox);
+  expect(await toolbar.boundingBox()).toEqual(toolbarBox);
+  expect(
+    await input?.evaluate((el) => el === document.querySelector(".manuscript")),
+  ).toBe(true);
+  expect(
+    await canvas?.evaluate((el) => el === document.querySelector("canvas")),
+  ).toBe(true);
+  await expect(area).toBeFocused();
+  await page.reload();
+  await expect(editor(page)).toHaveValue("한글 필사");
+});
