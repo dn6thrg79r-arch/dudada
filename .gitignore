@@ -1,0 +1,12 @@
+node_modules/
+.next/
+out/
+public/pdfjs/
+playwright-report/
+test-results/
+.env*
+*.tsbuildinfo
+# User documents must never be committed
+*.pdf
+*.txt
+!robots.txt
