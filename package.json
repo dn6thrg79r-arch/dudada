@@ -14,9 +14,11 @@
     "format": "prettier --write app lib tests scripts *.ts *.mjs *.json README.md",
     "build:pages": "node scripts/build-pages.mjs",
     "preview:pages": "node scripts/serve-pages.mjs",
-    "test:pages": "node scripts/test-pages.mjs"
+    "test:pages": "node scripts/test-pages.mjs",
+    "test:cloud": "node scripts/test-cloud.mjs"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.119.0",
     "idb": "^8.0.0",
     "lucide-react": "^0.468.0",
     "next": "^16.0.0",

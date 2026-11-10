@@ -28,11 +28,22 @@ import {
   type Notebook,
 } from "@/lib/notebook";
 import { listNotebooks, saveNotebook } from "@/lib/storage";
+import type { StudyRepository } from "@/lib/repository";
+const localRepository: StudyRepository = { listNotebooks, saveNotebook };
 import { openPdf, pdfError } from "@/lib/pdf";
 import PdfPreview from "./pdf-preview";
 import Editor from "./transcription-editor";
-export default function StudyApp() {
+export default function StudyApp({
+  repository = localRepository,
+  accountName,
+  onLogout,
+}: {
+  repository?: StudyRepository;
+  accountName?: string;
+  onLogout?: () => Promise<void>;
+}) {
   const [importRevision, setImportRevision] = useState(0);
+  const [pdfReload, setPdfReload] = useState(0);
   const [note, setNote] = useState<Notebook | null>(null),
     [shelf, setShelf] = useState<Notebook[]>([]),
     [ready, setReady] = useState(false);
@@ -50,6 +61,7 @@ export default function StudyApp() {
     [retryFile, setRetryFile] = useState<File | null>(null);
   // Keep IME guards in event handlers; disabled toggles flash the toolbar per syllable.
   const composing = useRef(false);
+  const attachedId = useRef<string | null>(null);
   const failedSaves = useRef(new Set<string>());
   const current = useRef<Notebook | null>(null),
     queue = useRef<SaveQueue<Notebook> | null>(null),
@@ -57,6 +69,7 @@ export default function StudyApp() {
     loading = useRef<PDFDocumentLoadingTask | null>(null),
     dirty = useRef(false),
     opening = useRef(false),
+    pdfSaving = useRef(false),
     reconnect = useRef(false);
   const picker = useRef<HTMLInputElement>(null),
     split = useRef<HTMLDivElement>(null),
@@ -65,12 +78,12 @@ export default function StudyApp() {
     queue.current = new SaveQueue(
       async (snapshot) => {
         try {
-          await saveNotebook(snapshot);
+          await repository.saveNotebook(snapshot);
           failedSaves.current.delete(snapshot.id);
         } catch (e) {
           failedSaves.current.add(snapshot.id);
           setError(
-            `“${snapshot.title}” 저장에 실패했습니다. 내 필사 자료에서 해당 자료를 열어 내보내기로 보관하거나 저장을 재시도하세요.`,
+            `“${snapshot.title}” 저장에 실패했습니다. ${e instanceof Error ? e.message : "네트워크와 저장 공간을 확인해 주세요."} 내보내기로 글을 보관할 수 있습니다.`,
           );
           throw e;
         }
@@ -79,9 +92,11 @@ export default function StudyApp() {
         dirty.current = state !== "saved" || failedSaves.current.size > 0;
         setSave(state);
       },
+      repository.savePdf ? (snapshot) => snapshot.id : undefined,
     );
     let live = true;
-    listNotebooks()
+    repository
+      .listNotebooks()
       .then((notes) => {
         if (!live) return;
         setShelf(notes);
@@ -91,11 +106,13 @@ export default function StudyApp() {
           setSave("saved");
         }
       })
-      .catch(() => {
+      .catch((e) => {
         if (live) {
           setSave("error");
           setError(
-            "저장소를 열 수 없습니다. 비공개 모드와 사이트 저장소 차단 설정을 확인해 주세요.",
+            e instanceof Error
+              ? e.message
+              : "저장소를 열 수 없습니다. 네트워크와 브라우저 저장소 설정을 확인해 주세요.",
           );
         }
       })
@@ -110,7 +127,7 @@ export default function StudyApp() {
       } catch {}
     });
     const warn = (event: BeforeUnloadEvent) => {
-      if (dirty.current) {
+      if (dirty.current || pdfSaving.current) {
         event.preventDefault();
         event.returnValue = "";
       }
@@ -122,7 +139,49 @@ export default function StudyApp() {
       void task.current?.destroy();
       void loading.current?.destroy();
     };
-  }, []);
+  }, [repository]);
+  const noteId = note?.id;
+  useEffect(() => {
+    const target = current.current;
+    if (!target || !repository.loadPdf || attachedId.current === target.id)
+      return;
+    let cancelled = false;
+    let savedFile: File | null = null;
+    repository
+      .loadPdf(target)
+      .then(async (file) => {
+        if (!file || cancelled) return;
+        savedFile = file;
+        const opened = await openPdf(file, "", () => {});
+        if (cancelled || current.current?.id !== target.id) {
+          await opened.task.destroy();
+          return;
+        }
+        const old = task.current;
+        task.current = opened.task;
+        attachedId.current = target.id;
+        setPdf(opened.document);
+        setAttached(target.id);
+        void old?.destroy();
+      })
+      .catch((e) => {
+        if (!cancelled) {
+          if (
+            savedFile &&
+            (e as { name?: string }).name === "PasswordException"
+          ) {
+            setRetryFile(savedFile);
+            reconnect.current = true;
+          }
+          setError(
+            `저장된 PDF를 열지 못했습니다. 암호가 있는 PDF는 원본을 다시 선택하고 PDF 암호를 입력해 주세요. ${e instanceof Error ? e.message : ""}`,
+          );
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [noteId, repository, pdfReload]);
   function update(change: Partial<Notebook>) {
     if (
       composing.current &&
@@ -133,12 +192,26 @@ export default function StudyApp() {
     if (!previous) return;
     const next = { ...previous, ...change, updated: new Date().toISOString() };
     current.current = next;
+    void repository
+      .stageNotebook?.(next)
+      .catch(() =>
+        setError(
+          "이 기기의 임시 저장에 실패했습니다. 클라우드 저장 상태를 확인하고 중요한 글은 내보내기로 보관하세요.",
+        ),
+      );
     setNote(next);
     setShelf((prev) => [next, ...prev.filter((n) => n.id !== next.id)]);
     void queue.current?.enqueue(next);
   }
   function activate(next: Notebook) {
     current.current = next;
+    void repository
+      .stageNotebook?.(next)
+      .catch(() =>
+        setError(
+          "이 기기의 임시 저장에 실패했습니다. 클라우드 저장 상태를 확인하고 중요한 글은 내보내기로 보관하세요.",
+        ),
+      );
     setNote(next);
     setShelf((prev) => [next, ...prev.filter((n) => n.id !== next.id)]);
     void queue.current?.enqueue(next);
@@ -210,17 +283,25 @@ export default function StudyApp() {
         ? { ...match, fingerprint, fileSize: file.size }
         : createNotebook(file.name, doc.numPages, fingerprint, file.size);
       if (!next) throw new Error("연결할 필사 자료를 선택해 주세요.");
+      if (repository.savePdf && !match) await repository.saveNotebook(next);
       const old = task.current;
       task.current = opened.task;
+      attachedId.current = next.id;
       setPdf(doc);
       setAttached(next.id);
       activate(next);
+      void old?.destroy();
+      if (repository.savePdf) {
+        pdfSaving.current = true;
+        setProgress(0);
+        await repository.savePdf(next, file, setProgress);
+      }
       setProgress(100);
       setPassword("");
       setRetryFile(null);
       setMobileTab("pdf");
-      void old?.destroy();
     } catch (e) {
+      if (opened && task.current !== opened.task) await opened.task.destroy();
       setError(
         e instanceof Error && e.message.startsWith("연결할")
           ? e.message
@@ -228,6 +309,7 @@ export default function StudyApp() {
       );
     } finally {
       loading.current = null;
+      pdfSaving.current = false;
       opening.current = false;
       setBusy(false);
     }
@@ -304,6 +386,33 @@ export default function StudyApp() {
           >
             <FolderOpen size={18} />
           </button>
+          {onLogout && (
+            <>
+              <span className="account-name">{accountName}</span>
+              <button
+                disabled={busy}
+                onClick={async () => {
+                  await queue.current?.flush();
+                  if (
+                    dirty.current &&
+                    !confirm(
+                      "저장하지 못한 글이 있습니다. TXT로 보관하지 않고 로그아웃할까요?",
+                    )
+                  )
+                    return;
+                  try {
+                    await onLogout();
+                  } catch {
+                    setError(
+                      "로그아웃에 실패했습니다. 연결을 확인하고 다시 시도해 주세요.",
+                    );
+                  }
+                }}
+              >
+                로그아웃
+              </button>
+            </>
+          )}
           <button
             aria-label="설정"
             aria-expanded={settings}
@@ -337,7 +446,7 @@ export default function StudyApp() {
       )}
       {busy && (
         <div className="loading-bar" role="status">
-          <span>PDF 여는 중 · {progress}%</span>
+          <span>PDF 불러오기·저장 중 · {progress}%</span>
           <progress max="100" value={progress} />
           <button onClick={() => void loading.current?.destroy()}>취소</button>
         </div>
@@ -442,6 +551,63 @@ export default function StudyApp() {
             {dark ? <Sun size={16} /> : <Moon size={16} />}{" "}
             {dark ? "밝은 화면" : "다크 모드"}
           </button>
+          {repository.savePdf && (
+            <button
+              onClick={async () => {
+                if (
+                  !confirm(
+                    "이 브라우저에 남아 있는 이전 필사를 현재 계정에 복사할까요? 원본 PDF는 한 번 다시 선택해야 합니다.",
+                  )
+                )
+                  return;
+                try {
+                  const previous = await listNotebooks();
+                  for (const original of previous) {
+                    const copy = {
+                      ...original,
+                      id: crypto.randomUUID(),
+                      updated: new Date().toISOString(),
+                    };
+                    await repository.saveNotebook(copy);
+                    setShelf((prev) => [copy, ...prev]);
+                  }
+                  setSettings(false);
+                } catch {
+                  setError(
+                    "이전 필사를 가져오지 못했습니다. 기존 자료는 삭제하지 않았습니다.",
+                  );
+                }
+              }}
+            >
+              이전 브라우저 필사 가져오기
+            </button>
+          )}
+          {repository.deletePdf && note && (
+            <button
+              onClick={async () => {
+                if (
+                  !confirm(
+                    "이 자료의 저장된 PDF만 삭제할까요? 필사 글은 남습니다.",
+                  )
+                )
+                  return;
+                try {
+                  await repository.deletePdf!(note);
+                  await task.current?.destroy();
+                  task.current = null;
+                  attachedId.current = null;
+                  setPdf(null);
+                  setAttached(null);
+                } catch (e) {
+                  setError(
+                    e instanceof Error ? e.message : "삭제에 실패했습니다.",
+                  );
+                }
+              }}
+            >
+              저장된 PDF 삭제
+            </button>
+          )}
           {note?.legacyText && (
             <button onClick={() => download(false, note.legacyText)}>
               이전 버전 편집 글 내려받기
@@ -641,6 +807,17 @@ export default function StudyApp() {
                       <br />
                       이어서 읽을 수 있어요.
                     </p>
+                    {repository.loadPdf && (
+                      <button
+                        disabled={busy}
+                        onClick={() => {
+                          attachedId.current = null;
+                          setPdfReload((v) => v + 1);
+                        }}
+                      >
+                        저장된 PDF 다시 불러오기
+                      </button>
+                    )}
                     <button
                       className="primary"
                       disabled={busy}
@@ -648,7 +825,11 @@ export default function StudyApp() {
                     >
                       원본 PDF 다시 연결
                     </button>
-                    <small>PDF 원본은 자동 저장하지 않습니다.</small>
+                    <small>
+                      {repository.savePdf
+                        ? "PDF가 저장되지 않았거나 연결에 실패했습니다. 원본을 선택하면 다시 저장합니다."
+                        : "PDF 원본은 자동 저장하지 않습니다."}
+                    </small>
                   </div>
                 )}
               </div>
@@ -805,8 +986,10 @@ export default function StudyApp() {
             <small>또는 PDF 파일을 이곳에 놓아 주세요.</small>
           </div>
           <p className="local-note">
-            <ShieldCheck size={15} /> 파일과 필사는 외부 서버로 전송되지
-            않습니다.
+            <ShieldCheck size={15} />{" "}
+            {repository.savePdf
+              ? "PDF와 필사는 로그인한 계정의 비공개 공간에 저장됩니다."
+              : "파일과 필사는 이 브라우저에서만 처리됩니다."}
           </p>
           {!ready && <p role="status">저장된 필사를 불러오는 중…</p>}
         </main>

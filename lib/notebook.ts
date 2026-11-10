@@ -73,11 +73,31 @@ export function matchesPdf(
 export class SaveQueue<T> {
   private tail: Promise<void> = Promise.resolve();
   private revision = 0;
+  private pending = new Map<string, { value: T; resolve: (() => void)[] }>();
+  private running = false;
   constructor(
     private write: (value: T) => Promise<void>,
     private status: (state: "saving" | "saved" | "error") => void,
+    private key?: (value: T) => string,
   ) {}
   enqueue(value: T) {
+    if (this.key) {
+      this.revision++;
+      this.status("saving");
+      const key = this.key(value);
+      const old = this.pending.get(key);
+      const done = new Promise<void>((resolve) =>
+        this.pending.set(key, {
+          value,
+          resolve: [...(old?.resolve || []), resolve],
+        }),
+      );
+      if (!this.running) {
+        this.running = true;
+        this.tail = this.drain();
+      }
+      return done;
+    }
     const revision = ++this.revision;
     this.status("saving");
     this.tail = this.tail
@@ -89,6 +109,24 @@ export class SaveQueue<T> {
         if (revision === this.revision) this.status("error");
       });
     return this.tail;
+  }
+  private async drain() {
+    while (this.pending.size) {
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      const [key, entry] = this.pending.entries().next().value!;
+      this.pending.delete(key);
+      const revision = this.revision;
+      try {
+        await this.write(entry.value);
+        if (revision === this.revision && !this.pending.size)
+          this.status("saved");
+      } catch {
+        if (revision === this.revision) this.status("error");
+      } finally {
+        entry.resolve.forEach((resolve) => resolve());
+      }
+    }
+    this.running = false;
   }
   flush() {
     return this.tail;

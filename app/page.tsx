@@ -1,4 +1,4 @@
-import StudyApp from "./study-app";
+import AccountApp from "./account-app";
 export default function Page() {
-  return <StudyApp />;
+  return <AccountApp />;
 }
