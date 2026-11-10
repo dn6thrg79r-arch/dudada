@@ -1,15 +1,20 @@
+import {
+  invalidCredentials,
+  existingAccount,
+  authFailureMessage,
+} from "./auth-errors";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 export const cloudConfigured = Boolean(
-  process.env.NEXT_PUBLIC_SUPABASE_URL &&
-  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,
+  process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() &&
+  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY?.trim(),
 );
 let client: SupabaseClient | undefined;
 export function cloudClient() {
   if (!cloudConfigured) throw new Error("클라우드 연결 설정이 필요합니다.");
   if (!client)
     client = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!,
+      process.env.NEXT_PUBLIC_SUPABASE_URL!.trim(),
+      process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!.trim(),
       {
         auth: {
           persistSession: true,
@@ -81,23 +86,19 @@ export async function loginOrCreate(username: string, password: string) {
     password: credential,
   });
   if (!login.error) return login.data;
-  if (login.error.code !== "invalid_credentials")
-    throw new Error(
-      "로그인하지 못했습니다. 네트워크 상태를 확인하고 잠시 후 다시 시도해 주세요.",
-    );
+  if (!invalidCredentials(login.error))
+    throw new Error(authFailureMessage(login.error));
   const created = await client.auth.signUp({
     email,
     password: credential,
     options: { data: { display_name: username.normalize("NFKC").trim() } },
   });
-  if (created.error?.code === "user_already_exists")
+  if (created.error && existingAccount(created.error))
     throw new Error(
       "아이디 또는 비밀번호를 확인해 주세요. 같은 아이디의 비밀번호가 다르면 새 계정을 만들지 않습니다.",
     );
   if (created.error)
-    throw new Error(
-      "계정을 만들지 못했습니다. 잠시 후 다시 시도하거나 관리자에게 서버의 가입 설정을 확인해 달라고 해주세요.",
-    );
+    throw new Error(authFailureMessage(created.error, "계정 생성"));
   if (!created.data.session)
     throw new Error(
       "이메일 확인 때문에 가입이 완료되지 않았습니다. 관리자가 Supabase의 Confirm email 설정을 꺼야 합니다.",

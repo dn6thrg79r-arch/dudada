@@ -6,7 +6,7 @@ test.skip(
   "Requires the explicitly configured mock-service test build.",
 );
 // A protocol fixture, never used by the deployed app. It does not validate real Supabase RLS.
-function backend() {
+function backend(options: { legacy?: boolean; invalidKey?: boolean } = {}) {
   type User = {
     id: string;
     email: string;
@@ -21,6 +21,7 @@ function backend() {
     >(),
     documents = new Map<string, unknown>(),
     objects = new Map<string, Buffer>();
+  const requests: string[] = [];
   let failUpload = false;
   let failWrite = false;
   function identity(token: string) {
@@ -50,6 +51,7 @@ function backend() {
       const req = route.request(),
         url = new URL(req.url()),
         path = url.pathname;
+      requests.push(path);
       const owner = identity(
         (req.headers().authorization || "").replace("Bearer ", ""),
       );
@@ -57,12 +59,15 @@ function backend() {
         route.fulfill({
           status,
           contentType: "application/json",
-          headers: {
-            "x-supabase-api-version": "2024-01-01",
-            "access-control-expose-headers": "x-supabase-api-version",
-          },
+          headers: options.legacy
+            ? {}
+            : {
+                "x-supabase-api-version": "2024-01-01",
+                "access-control-expose-headers": "x-supabase-api-version",
+              },
           body: JSON.stringify(data),
         });
+      if (options.invalidKey) return json({ message: "Invalid API key" }, 401);
       if (req.method() === "OPTIONS") return route.fulfill({ status: 204 });
       if (path.endsWith("/token") || path.endsWith("/signup")) {
         const body = req.postDataJSON();
@@ -70,7 +75,9 @@ function backend() {
         if (path.endsWith("/signup")) {
           if (user)
             return json(
-              { code: "user_already_exists", msg: "already exists" },
+              options.legacy
+                ? { message: "User already registered" }
+                : { code: "user_already_exists", msg: "already exists" },
               422,
             );
           user = {
@@ -83,11 +90,13 @@ function backend() {
           users.set(body.email, user);
         } else if (!user || body.password !== user.password)
           return json(
-            {
-              code: "invalid_credentials",
-              error_code: "invalid_credentials",
-              msg: "invalid",
-            },
+            options.legacy
+              ? { message: "Invalid login credentials" }
+              : {
+                  code: "invalid_credentials",
+                  error_code: "invalid_credentials",
+                  msg: "invalid",
+                },
             400,
           );
         return json(response(user!));
@@ -190,6 +199,7 @@ function backend() {
   }
   return {
     install,
+    requests,
     notes,
     documents,
     objects,
@@ -398,5 +408,48 @@ test("4자 암호로 가입·재로그인하고 3자는 제출하지 않으며 �
   await expect(page.locator(".account-card [role=alert]")).toContainText(
     "아이디 또는 비밀번호",
   );
+  await context.close();
+});
+
+test("오류 코드 없는 인증 응답에서도 가입·재로그인과 잘못된 암호를 처리한다", async ({
+  browser,
+  baseURL,
+}) => {
+  const service = backend({ legacy: true });
+  const context = await browser.newContext({ baseURL });
+  await service.install(context);
+  const page = await context.newPage();
+  await login(page, "호환계정", "1234");
+  await expect(
+    page.getByRole("button", { name: "로그아웃", exact: true }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "로그아웃", exact: true }).click();
+  await login(page, "호환계정", "1234");
+  await expect(
+    page.getByRole("button", { name: "로그아웃", exact: true }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "로그아웃", exact: true }).click();
+  await login(page, "호환계정", "4321");
+  await expect(page.locator(".account-card [role=alert]")).toContainText(
+    "아이디 또는 비밀번호",
+  );
+  await context.close();
+});
+test("잘못된 연결키는 HTTP 401로 안내하고 신규 가입 요청을 보내지 않는다", async ({
+  browser,
+  baseURL,
+}) => {
+  const service = backend({ invalidKey: true });
+  const context = await browser.newContext({ baseURL });
+  await service.install(context);
+  const page = await context.newPage();
+  await login(page, "연결오류계정", "1234");
+  await expect(page.locator(".account-card [role=alert]")).toContainText(
+    "연결키",
+  );
+  await expect(page.locator(".account-card [role=alert]")).toContainText(
+    "HTTP 401",
+  );
+  expect(service.requests.some((path) => path.endsWith("/signup"))).toBe(false);
   await context.close();
 });
