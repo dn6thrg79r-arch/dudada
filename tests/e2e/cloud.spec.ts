@@ -362,3 +362,41 @@ test("101MB PDF를 여러 조각으로 저장하고 다른 브라우저에서 �
   await firstContext.close();
   await secondContext.close();
 });
+
+test("4자 암호로 가입·재로그인하고 3자는 제출하지 않으며 기존 암호 오류를 구분한다", async ({
+  browser,
+  baseURL,
+}) => {
+  const service = backend();
+  const context = await browser.newContext({ baseURL });
+  await service.install(context);
+  const page = await context.newPage();
+  await page.goto("./");
+  await page.getByLabel("아이디", { exact: true }).fill("짧은암호계정");
+  const password = page.getByLabel("비밀번호", { exact: true });
+  await expect(password).toHaveAttribute("minlength", "4");
+  await password.fill("123");
+  await page.getByRole("button", { name: "들어가기", exact: true }).click();
+  expect(
+    await password.evaluate((e: HTMLInputElement) => e.validity.tooShort),
+  ).toBe(true);
+  await expect(page.getByRole("textbox", { name: "필사 편집기" })).toHaveCount(
+    0,
+  );
+  await password.fill("1234");
+  await page.getByRole("button", { name: "들어가기", exact: true }).click();
+  await expect(
+    page.getByRole("button", { name: "로그아웃", exact: true }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "로그아웃", exact: true }).click();
+  await login(page, "짧은암호계정", "1234");
+  await expect(
+    page.getByRole("button", { name: "로그아웃", exact: true }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "로그아웃", exact: true }).click();
+  await login(page, "짧은암호계정", "4321");
+  await expect(page.locator(".account-card [role=alert]")).toContainText(
+    "아이디 또는 비밀번호",
+  );
+  await context.close();
+});

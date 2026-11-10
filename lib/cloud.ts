@@ -32,12 +32,54 @@ export async function usernameEmail(username: string) {
   );
   return `u.${Array.from(new Uint8Array(bytes), (b) => b.toString(16).padStart(2, "0")).join("")}@accounts.dudada.invalid`;
 }
+export const MIN_PASSWORD_LENGTH = 4;
+export const MAX_PASSWORD_LENGTH = 128;
+export function validatePassword(password: string) {
+  if (
+    password.length < MIN_PASSWORD_LENGTH ||
+    password.length > MAX_PASSWORD_LENGTH
+  )
+    throw new Error("비밀번호는 4~128자로 입력해 주세요.");
+}
+// Supabase enforces >=6 characters. Versioned client derivation supports the
+// requested short passphrases without changing credentials of existing >=8-char users.
+// Keep these parameters fixed: changing them would lock out existing short-password accounts.
+export async function authPassword(email: string, password: string) {
+  validatePassword(password);
+  if (password.length >= 8) return password;
+  const material = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(password),
+    "PBKDF2",
+    false,
+    ["deriveBits"],
+  );
+  const bits = await crypto.subtle.deriveBits(
+    {
+      name: "PBKDF2",
+      hash: "SHA-256",
+      iterations: 310000,
+      salt: new TextEncoder().encode("dudada:short-password:v1:" + email),
+    },
+    material,
+    256,
+  );
+  return (
+    "Dd1!" +
+    Array.from(new Uint8Array(bits), (b) =>
+      b.toString(16).padStart(2, "0"),
+    ).join("")
+  );
+}
 export async function loginOrCreate(username: string, password: string) {
-  if (password.length < 8 || password.length > 128)
-    throw new Error("비밀번호는 8~128자로 입력해 주세요.");
+  validatePassword(password);
   const email = await usernameEmail(username);
+  const credential = await authPassword(email, password);
   const client = cloudClient();
-  const login = await client.auth.signInWithPassword({ email, password });
+  const login = await client.auth.signInWithPassword({
+    email,
+    password: credential,
+  });
   if (!login.error) return login.data;
   if (login.error.code !== "invalid_credentials")
     throw new Error(
@@ -45,7 +87,7 @@ export async function loginOrCreate(username: string, password: string) {
     );
   const created = await client.auth.signUp({
     email,
-    password,
+    password: credential,
     options: { data: { display_name: username.normalize("NFKC").trim() } },
   });
   if (created.error?.code === "user_already_exists")

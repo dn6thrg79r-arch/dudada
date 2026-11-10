@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { usernameEmail } from "../lib/cloud";
+import { usernameEmail, validatePassword, authPassword } from "../lib/cloud";
 import {
   PDF_CHUNK_BYTES,
   pdfChunkPaths,
@@ -101,5 +101,37 @@ describe("클라우드 계정과 저장", () => {
       { id: "b", text: "다른 자료" },
     ]);
     expect(states.at(-1)).toBe("saved");
+  });
+});
+
+describe("4자 이상 암호", () => {
+  it("4자와 128자는 허용하고 3자와 129자는 거절한다", () => {
+    expect(() => validatePassword("1234")).not.toThrow();
+    expect(() => validatePassword("a".repeat(128))).not.toThrow();
+    expect(() => validatePassword("123")).toThrow("4~128");
+    expect(() => validatePassword("a".repeat(129))).toThrow();
+  });
+  it("기존 8자 이상 암호의 인증값을 변경하지 않는다", async () => {
+    expect(
+      await authPassword("user@accounts.dudada.invalid", "existing-password"),
+    ).toBe("existing-password");
+    expect(await authPassword("user@accounts.dudada.invalid", "12345678")).toBe(
+      "12345678",
+    );
+  });
+  it("짧은 암호는 계정별로 동일한 버전 고정 인증값을 만든다", async () => {
+    const email = await usernameEmail("study_1");
+    const value = await authPassword(email, "1234");
+    expect(value).toBe(
+      "Dd1!87c3c539d2a7c6b83964cdaad84d04df2201127a903919db926bc221209e9dc9",
+    );
+    expect(value.length).toBe(68);
+    expect(await authPassword(await usernameEmail("STUDY_1"), "1234")).toBe(
+      value,
+    );
+    expect(await authPassword(await usernameEmail("study_2"), "1234")).not.toBe(
+      value,
+    );
+    expect(await authPassword(email, "1235")).not.toBe(value);
   });
 });

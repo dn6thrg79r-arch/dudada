@@ -2,7 +2,12 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { BookOpen } from "lucide-react";
-import { cloudClient, cloudConfigured, loginOrCreate } from "@/lib/cloud";
+import {
+  cloudClient,
+  cloudConfigured,
+  loginOrCreate,
+  MIN_PASSWORD_LENGTH,
+} from "@/lib/cloud";
 import { createCloudRepository } from "@/lib/cloud-repository";
 import StudyApp from "./study-app";
 export default function AccountApp() {
@@ -95,7 +100,7 @@ export default function AccountApp() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
-              minLength={8}
+              minLength={MIN_PASSWORD_LENGTH}
               maxLength={128}
             />
           </label>
@@ -109,7 +114,7 @@ export default function AccountApp() {
         <p className="account-hint">
           처음 쓰는 아이디는 새로 만들어집니다.
           <br />
-          비밀번호는 8자 이상으로 정해 주세요.
+          비밀번호는 4자 이상으로 정해 주세요.
           <br />
           이메일 없이 사용하므로 비밀번호를 잊으면 직접 복구할 수 없습니다.
         </p>
