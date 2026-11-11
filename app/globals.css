@@ -885,3 +885,54 @@ input:not([type="file"]):not([type="checkbox"]) {
     font-size: 10px;
   }
 }
+/* Keep the workspace/editor mounted: hiding chrome must not reset native undo or IME. */
+.study-shell.is-focused > .app-header,
+.study-shell.is-focused > .document-toolbar,
+.study-shell.is-focused .document-toolbar,
+.study-shell.is-focused .pane-heading,
+.study-shell.is-focused .editor-foot,
+.study-shell.is-focused .mobile-tabs,
+.study-shell.is-focused .drawer,
+.study-shell.is-focused .settings-panel {
+  display: none;
+}
+.study-shell:fullscreen {
+  width: 100%;
+  height: 100dvh;
+  background: var(--bg);
+}
+.exit-focus {
+  position: absolute;
+  top: max(10px, env(safe-area-inset-top));
+  right: max(12px, env(safe-area-inset-right));
+  z-index: 40;
+  width: 38px;
+  height: 38px;
+  padding: 8px;
+  background: var(--paper);
+  opacity: 0.55;
+  border: 1px solid var(--line);
+  box-shadow: 0 2px 9px #0001;
+}
+.exit-focus:hover,
+.exit-focus:focus-visible {
+  opacity: 1;
+}
+@media (max-width: 600px) {
+  .focus-toggle span {
+    display: none;
+  }
+  .study-shell.is-focused .split-workspace {
+    display: grid;
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
+  }
+  .study-shell.is-focused .pdf-pane,
+  .study-shell.is-focused .editor-pane {
+    display: flex;
+  }
+  .exit-focus {
+    width: 44px;
+    height: 44px;
+  }
+}

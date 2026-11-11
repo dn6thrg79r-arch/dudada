@@ -365,3 +365,72 @@ test("한글을 연속 입력해도 상단 버튼과 도구줄이 반짝이거�
   await page.reload();
   await expect(editor(page)).toHaveValue("한글 필사");
 });
+
+test("전체화면에서 PDF·필사만 남기고 입력·자동 저장·분할을 유지하며 복귀한다", async ({
+  page,
+}) => {
+  await openPdf(page);
+  const area = editor(page);
+  await area.fill("전체화면에서도 남는 필사");
+  await saved(page);
+  await area.focus();
+  const node = await area.elementHandle();
+  await page.getByRole("button", { name: "전체화면", exact: true }).click();
+  await expect(page.locator(".study-shell")).toHaveClass(/is-focused/);
+  await expect(page.locator(".app-header")).toBeHidden();
+  await expect(page.locator(".document-toolbar")).toBeHidden();
+  await expect(page.locator(".pane-heading").first()).toBeHidden();
+  await expect(page.locator(".editor-foot")).toBeHidden();
+  await expect(
+    page.getByRole("img", { name: "PDF 원본 1페이지", exact: true }),
+  ).toBeVisible();
+  await expect(area).toBeVisible();
+  await expect(area).toBeFocused();
+  expect(
+    await node?.evaluate((el) => el === document.querySelector(".manuscript")),
+  ).toBe(true);
+  await area.press("End");
+  await page.keyboard.insertText(" 이어서 입력");
+  await saved(page);
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".study-shell")).not.toHaveClass(/is-focused/);
+  await expect(page.locator(".app-header")).toBeVisible();
+  await expect(area).toHaveValue("전체화면에서도 남는 필사 이어서 입력");
+  await page.getByRole("button", { name: "전체화면", exact: true }).click();
+  await page
+    .getByRole("button", { name: "전체화면 나가기", exact: true })
+    .click();
+  await expect(page.locator(".document-toolbar")).toBeVisible();
+  await page.reload();
+  await expect(area).toHaveValue("전체화면에서도 남는 필사 이어서 입력");
+});
+test("전체화면 API가 없어도 두 영역을 보여 주고 Esc·나가기 버튼으로 복귀한다", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(Element.prototype, "requestFullscreen", {
+      configurable: true,
+      value: undefined,
+    });
+  });
+  await openPdf(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByRole("button", { name: "전체화면", exact: true }).click();
+  await expect(page.getByLabel("PDF 스크롤 영역")).toBeVisible();
+  await expect(editor(page)).toBeVisible();
+  await expect(page.locator(".mobile-tabs")).toBeHidden();
+  await expect(page.locator(".pdf-pane")).toBeVisible();
+  await expect(page.locator(".editor-pane")).toBeVisible();
+  await editor(page).focus();
+  await editor(page).dispatchEvent("compositionstart");
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".study-shell")).toHaveClass(/is-focused/);
+  await editor(page).dispatchEvent("compositionend", { data: "" });
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".study-shell")).not.toHaveClass(/is-focused/);
+  await page.getByRole("button", { name: "전체화면", exact: true }).click();
+  await page
+    .getByRole("button", { name: "전체화면 나가기", exact: true })
+    .click();
+  await expect(page.locator(".mobile-tabs")).toBeVisible();
+});

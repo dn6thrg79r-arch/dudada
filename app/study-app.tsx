@@ -8,6 +8,8 @@ import {
   Minus,
   Plus,
   Maximize,
+  Expand,
+  Minimize,
   Download,
   Save,
   Settings,
@@ -33,6 +35,7 @@ const localRepository: StudyRepository = { listNotebooks, saveNotebook };
 import { openPdf, pdfError } from "@/lib/pdf";
 import PdfPreview from "./pdf-preview";
 import Editor from "./transcription-editor";
+import { useFocusMode } from "./use-focus-mode";
 export default function StudyApp({
   repository = localRepository,
   accountName,
@@ -61,6 +64,12 @@ export default function StudyApp({
     [retryFile, setRetryFile] = useState<File | null>(null);
   // Keep IME guards in event handlers; disabled toggles flash the toolbar per syllable.
   const composing = useRef(false);
+  const shell = useRef<HTMLDivElement>(null);
+  const {
+    focusMode,
+    enter: enterFocus,
+    exit: exitFocus,
+  } = useFocusMode(shell, composing);
   const attachedId = useRef<string | null>(null);
   const failedSaves = useRef(new Set<string>());
   const current = useRef<Notebook | null>(null),
@@ -346,7 +355,18 @@ export default function StudyApp({
   }
   const connected = !!note && attached === note.id && !!pdf;
   return (
-    <div className="study-shell">
+    <div ref={shell} className={`study-shell${focusMode ? " is-focused" : ""}`}>
+      {focusMode && (
+        <button
+          className="exit-focus"
+          aria-label="전체화면 나가기"
+          title="전체화면 나가기 (Esc)"
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={exitFocus}
+        >
+          <Minimize size={18} />
+        </button>
+      )}
       <input
         className="sr-only"
         ref={picker}
@@ -370,6 +390,22 @@ export default function StudyApp({
           </span>
         </a>
         <div className="header-actions">
+          <button
+            className="focus-toggle"
+            aria-label="전체화면"
+            aria-pressed={focusMode}
+            title="PDF와 필사만 보기"
+            disabled={!note}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => {
+              setSettings(false);
+              setLibrary(false);
+              enterFocus();
+            }}
+          >
+            <Expand size={17} />
+            <span>전체화면</span>
+          </button>
           <button
             disabled={!ready || busy}
             className="primary"
