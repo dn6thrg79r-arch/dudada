@@ -936,3 +936,49 @@ input:not([type="file"]):not([type="checkbox"]) {
     height: 44px;
   }
 }
+.is-focused .pdf-pane {
+  position: relative;
+}
+.focus-page-controls {
+  position: absolute;
+  bottom: max(12px, env(safe-area-inset-bottom));
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: 0 2px 12px #0001;
+  z-index: 10;
+  color: var(--muted);
+}
+.focus-page-controls button {
+  width: 30px;
+  height: 30px;
+  padding: 4px;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+}
+.focus-page-controls button:hover {
+  background: var(--soft);
+}
+.focus-page-controls span {
+  font-size: 11px;
+  min-width: 40px;
+  text-align: center;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.is-focused .pdf-surface {
+  padding-bottom: 70px;
+}
+@media (pointer: coarse) {
+  .focus-page-controls button {
+    width: 40px;
+    height: 40px;
+  }
+}

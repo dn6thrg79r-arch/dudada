@@ -434,3 +434,46 @@ test("전체화면 API가 없어도 두 영역을 보여 주고 Esc·나가기 �
     .click();
   await expect(page.locator(".mobile-tabs")).toBeVisible();
 });
+
+test("전체화면의 작은 버튼으로 페이지를 이동하고 페이지별 필사를 복원한다", async ({
+  page,
+}) => {
+  await openPdf(page);
+  await editor(page).fill("첫 페이지 필사");
+  await page.getByRole("button", { name: "전체화면", exact: true }).click();
+  const nav = page.getByRole("navigation", { name: "전체화면 페이지 이동" });
+  await expect(nav).toBeVisible();
+  await expect(nav).toContainText("1 / 8");
+  await expect(
+    nav.getByRole("button", { name: "이전 페이지", exact: true }),
+  ).toBeDisabled();
+  await nav.getByRole("button", { name: "다음 페이지", exact: true }).click();
+  await expect(
+    page.getByRole("img", { name: "PDF 원본 2페이지", exact: true }),
+  ).toBeVisible();
+  await expect(nav).toContainText("2 / 8");
+  await expect(editor(page)).toHaveValue("");
+  await editor(page).fill("두 번째 필사");
+  await nav.getByRole("button", { name: "이전 페이지", exact: true }).click();
+  await expect(editor(page)).toHaveValue("첫 페이지 필사");
+  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: "설정", exact: true }).click();
+  await page.getByLabel("PDF 페이지에 맞춰 필사 전환").uncheck();
+  await page.getByRole("button", { name: "닫기", exact: true }).click();
+  await page.getByRole("button", { name: "전체화면", exact: true }).click();
+  await editor(page).focus();
+  const node = await editor(page).elementHandle();
+  await nav.getByRole("button", { name: "다음 페이지", exact: true }).click();
+  await expect(editor(page)).toHaveValue("첫 페이지 필사");
+  await expect(editor(page)).toBeFocused();
+  expect(
+    await node?.evaluate((el) => el === document.querySelector(".manuscript")),
+  ).toBe(true);
+  for (let i = 2; i < 8; i++)
+    await nav.getByRole("button", { name: "다음 페이지", exact: true }).click();
+  await expect(nav).toContainText("8 / 8");
+  await expect(
+    nav.getByRole("button", { name: "다음 페이지", exact: true }),
+  ).toBeDisabled();
+  await expect(page.locator(".app-header")).toBeHidden();
+});

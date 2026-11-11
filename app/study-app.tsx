@@ -809,6 +809,36 @@ export default function StudyApp({
             style={{ "--pdf-share": `${note.split}%` } as React.CSSProperties}
           >
             <section className="pdf-pane" aria-label="PDF 뷰어">
+              {focusMode && (
+                <nav
+                  className="focus-page-controls"
+                  aria-label="전체화면 페이지 이동"
+                  onMouseDown={(e) => {
+                    if ((e.target as HTMLElement).closest("button"))
+                      e.preventDefault();
+                  }}
+                >
+                  <button
+                    aria-label="이전 페이지"
+                    title="이전 페이지"
+                    disabled={note.pdfPage <= 1}
+                    onClick={() => navigate(note.pdfPage - 1)}
+                  >
+                    <ChevronLeft size={17} />
+                  </button>
+                  <span aria-label="전체화면 현재 페이지">
+                    {note.pdfPage} / {note.pageCount}
+                  </span>
+                  <button
+                    aria-label="다음 페이지"
+                    title="다음 페이지"
+                    disabled={note.pdfPage >= note.pageCount}
+                    onClick={() => navigate(note.pdfPage + 1)}
+                  >
+                    <ChevronRight size={17} />
+                  </button>
+                </nav>
+              )}
               <div className="pane-heading">
                 <span>원본 읽기</span>
                 <small>
