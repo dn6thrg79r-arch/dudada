@@ -1,9 +1,20 @@
 import {
+  isolatedAuthClient,
+  normalizeUsername,
+  missingAccountSetup,
+  registerUsername,
+  accountError,
+} from "./account-settings";
+import {
   invalidCredentials,
   existingAccount,
   authFailureMessage,
 } from "./auth-errors";
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import {
+  createClient,
+  type SupabaseClient,
+  type AuthResponse,
+} from "@supabase/supabase-js";
 export const cloudConfigured = Boolean(
   process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() &&
   process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY?.trim(),
@@ -78,30 +89,58 @@ export async function authPassword(email: string, password: string) {
 }
 export async function loginOrCreate(username: string, password: string) {
   validatePassword(password);
-  const email = await usernameEmail(username);
-  const credential = await authPassword(email, password);
-  const client = cloudClient();
-  const login = await client.auth.signInWithPassword({
-    email,
-    password: credential,
+  const originalEmail = await usernameEmail(username);
+  const client = isolatedAuthClient();
+  const resolved = await client.rpc("resolve_study_username", {
+    p_username: normalizeUsername(username),
   });
-  if (!login.error) return login.data;
-  if (!invalidCredentials(login.error))
-    throw new Error(authFailureMessage(login.error));
-  const created = await client.auth.signUp({
-    email,
-    password: credential,
-    options: { data: { display_name: username.normalize("NFKC").trim() } },
-  });
-  if (created.error && existingAccount(created.error))
+  if (resolved.error && !missingAccountSetup(resolved.error))
     throw new Error(
-      "아이디 또는 비밀번호를 확인해 주세요. 같은 아이디의 비밀번호가 다르면 새 계정을 만들지 않습니다.",
+      authFailureMessage(
+        { ...resolved.error, status: resolved.status },
+        "아이디 확인",
+      ),
     );
-  if (created.error)
-    throw new Error(authFailureMessage(created.error, "계정 생성"));
-  if (!created.data.session)
+  if (resolved.data?.status === "retired")
+    throw new Error("변경 전 아이디입니다. 새 아이디로 로그인해 주세요.");
+  const known = resolved.data?.status === "active";
+  const email = known ? (resolved.data.email as string) : originalEmail;
+  const credential = await authPassword(email, password);
+  let result: AuthResponse = await client.auth.signInWithPassword({
+    email,
+    password: credential,
+  });
+  if (result.error) {
+    if (!invalidCredentials(result.error))
+      throw new Error(authFailureMessage(result.error));
+    if (known) throw new Error("아이디 또는 비밀번호를 확인해 주세요.");
+    result = await client.auth.signUp({
+      email,
+      password: credential,
+      options: { data: { display_name: username.normalize("NFKC").trim() } },
+    });
+    if (result.error && existingAccount(result.error))
+      throw new Error(
+        "아이디 또는 비밀번호를 확인해 주세요. 같은 아이디의 비밀번호가 다르면 새 계정을 만들지 않습니다.",
+      );
+    if (result.error)
+      throw new Error(authFailureMessage(result.error, "계정 생성"));
+  }
+  if (!result.data.session)
     throw new Error(
       "이메일 확인 때문에 가입이 완료되지 않았습니다. 관리자가 Supabase의 Confirm email 설정을 꺼야 합니다.",
     );
-  return created.data;
+  try {
+    await registerUsername(client, username);
+    const session = result.data.session;
+    const adopted = await cloudClient().auth.setSession({
+      access_token: session.access_token,
+      refresh_token: session.refresh_token,
+    });
+    if (adopted.error) throw new Error(authFailureMessage(adopted.error));
+    return adopted.data;
+  } catch (error) {
+    await client.auth.signOut({ scope: "local" });
+    throw error instanceof Error ? error : new Error(accountError({}));
+  }
 }

@@ -40,10 +40,12 @@ export default function StudyApp({
   repository = localRepository,
   accountName,
   onLogout,
+  onManageAccount,
 }: {
   repository?: StudyRepository;
   accountName?: string;
   onLogout?: () => Promise<void>;
+  onManageAccount?: () => void;
 }) {
   const [importRevision, setImportRevision] = useState(0);
   const [pdfReload, setPdfReload] = useState(0);
@@ -427,7 +429,14 @@ export default function StudyApp({
           </button>
           {onLogout && (
             <>
-              <span className="account-name">{accountName}</span>
+              <button
+                className="account-name"
+                onClick={onManageAccount}
+                aria-label={`${accountName} 계정 설정`}
+                title="아이디·비밀번호 변경"
+              >
+                {accountName}
+              </button>
               <button
                 disabled={busy}
                 onClick={async () => {
@@ -549,6 +558,9 @@ export default function StudyApp({
       )}
       {settings && (
         <section className="settings-panel" aria-label="공부방 설정">
+          {onManageAccount && (
+            <button onClick={onManageAccount}>아이디·비밀번호 변경</button>
+          )}
           <label>
             자료 이름
             <input

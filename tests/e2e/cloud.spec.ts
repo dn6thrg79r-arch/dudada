@@ -1,12 +1,19 @@
 import { test, expect, type BrowserContext, type Page } from "@playwright/test";
 import { pdfFixture } from "./pdf-fixture";
+import { createHash } from "node:crypto";
 import { writeFile } from "node:fs/promises";
 test.skip(
   process.env.CLOUD_E2E !== "1",
   "Requires the explicitly configured mock-service test build.",
 );
 // A protocol fixture, never used by the deployed app. It does not validate real Supabase RLS.
-function backend(options: { legacy?: boolean; invalidKey?: boolean } = {}) {
+function backend(
+  options: {
+    legacy?: boolean;
+    invalidKey?: boolean;
+    missingSetup?: boolean;
+  } = {},
+) {
   type User = {
     id: string;
     email: string;
@@ -21,6 +28,7 @@ function backend(options: { legacy?: boolean; invalidKey?: boolean } = {}) {
     >(),
     documents = new Map<string, unknown>(),
     objects = new Map<string, Buffer>();
+  const aliases = new Map<string, { owner: string; active: boolean }>();
   const requests: string[] = [];
   let failUpload = false;
   let failWrite = false;
@@ -39,7 +47,7 @@ function backend(options: { legacy?: boolean; invalidKey?: boolean } = {}) {
     const encoded = (value: unknown) =>
       Buffer.from(JSON.stringify(value)).toString("base64url");
     return {
-      access_token: `${encoded({ alg: "HS256", typ: "JWT" })}.${encoded({ sub: user.id, aud: "authenticated", role: "authenticated", exp: Math.floor(Date.now() / 1000) + 3600 })}.signature`,
+      access_token: `${encoded({ alg: "HS256", typ: "JWT" })}.${encoded({ sub: user.id, aud: "authenticated", role: "authenticated", exp: Math.floor(Date.now() / 1000) + 3600 })}.${Buffer.from("test-signature").toString("base64url")}`,
       refresh_token: `refresh-${user.id}`,
       expires_in: 3600,
       token_type: "bearer",
@@ -101,9 +109,55 @@ function backend(options: { legacy?: boolean; invalidKey?: boolean } = {}) {
           );
         return json(response(user!));
       }
+      if (path.includes("/rpc/")) {
+        if (options.missingSetup)
+          return json({ code: "PGRST202", message: "function missing" }, 404);
+        const operation = path.split("/").at(-1);
+        const name = req.postDataJSON()?.p_username;
+        const alias = aliases.get(name);
+        if (operation === "resolve_study_username")
+          return json(
+            !alias
+              ? { status: "available" }
+              : !alias.active
+                ? { status: "retired" }
+                : {
+                    status: "active",
+                    email: [...users.values()].find(
+                      (u) => u.id === alias.owner,
+                    )!.email,
+                  },
+          );
+        if (!owner) return json({ message: "not authenticated" }, 401);
+        const own = [...aliases.entries()].find(
+          ([, value]) => value.owner === owner && value.active,
+        )?.[0];
+        if (operation === "current_study_username") return json(own || null);
+        if (alias && alias.owner !== owner)
+          return json({ message: "username_taken" }, 400);
+        if (operation === "register_study_username") {
+          if (own && own !== name)
+            return json({ message: "username_changed" }, 400);
+          const email = `u.${createHash("sha256").update(name).digest("hex")}@accounts.dudada.invalid`;
+          if (!own && users.get(email)?.id !== owner)
+            return json({ message: "username_changed" }, 400);
+        } else if (operation === "rename_study_username") {
+          const email = `u.${createHash("sha256").update(name).digest("hex")}@accounts.dudada.invalid`;
+          const legacy = users.get(email);
+          if (legacy && legacy.id !== owner)
+            return json({ message: "username_taken" }, 400);
+          if (own) aliases.get(own)!.active = false;
+        } else return json({ message: "unknown rpc" }, 404);
+        aliases.set(name, { owner, active: true });
+        return json(name);
+      }
       const user = [...users.values()].find((u) => u.id === owner);
       if (!user) return json({ message: "not authenticated" }, 401);
       if (path.endsWith("/user")) {
+        if (req.method() === "PUT") {
+          const body = req.postDataJSON();
+          if (body.password) user.password = body.password;
+        }
         const { password: _, ...data } = user;
         void _;
         return json(data);
@@ -452,4 +506,170 @@ test("잘못된 연결키는 HTTP 401로 안내하고 신규 가입 요청을 �
   );
   expect(service.requests.some((path) => path.endsWith("/signup"))).toBe(false);
   await context.close();
+});
+
+test("계정 설정: 4자 암호 확인·아이디 변경·암호 변경 후에도 PDF와 필사를 유지한다", async ({
+  browser,
+  baseURL,
+}, info) => {
+  const service = backend();
+  const context = await browser.newContext({ baseURL });
+  await service.install(context);
+  const page = await context.newPage();
+  await login(page, "123", "1234");
+  await upload(page);
+  const editor = page.getByRole("textbox", { name: "필사 편집기" });
+  await editor.fill("계정 이름을 바꿔도 남아 있는 필사.");
+  await expect(page.locator(".save-state")).toHaveAttribute(
+    "data-save-state",
+    "saved",
+  );
+  await editor.evaluate((e) => e.setAttribute("data-kept", "yes"));
+  const originalOwner = [...service.notes.values()][0].owner_id;
+  await page
+    .getByRole("button", { name: "123 계정 설정", exact: true })
+    .click();
+  const dialog = page.getByRole("dialog", { name: "계정 설정" });
+  await dialog.getByLabel("현재 비밀번호", { exact: true }).fill("9999");
+  await dialog.getByLabel("새 아이디", { exact: true }).fill("공부하는나");
+  await dialog.getByRole("button", { name: "변경 사항 저장" }).click();
+  await expect(dialog.getByRole("alert")).toContainText("현재 비밀번호가 맞지");
+  await dialog.getByLabel("현재 비밀번호", { exact: true }).fill("1234");
+  await dialog.getByRole("button", { name: "변경 사항 저장" }).click();
+  await expect(dialog.getByRole("status")).toContainText(
+    "아이디를 변경했습니다",
+  );
+  await expect(editor).toHaveAttribute("data-kept", "yes");
+  await page.screenshot({ path: info.outputPath("account-settings.png") });
+  await dialog.getByRole("button", { name: "계정 설정 닫기" }).click();
+  await expect(
+    page.getByRole("button", { name: "공부하는나 계정 설정", exact: true }),
+  ).toBeVisible();
+  await page.reload();
+  await expect(
+    page.getByRole("button", { name: "공부하는나 계정 설정", exact: true }),
+  ).toBeVisible();
+  await expect(editor).toHaveValue("계정 이름을 바꿔도 남아 있는 필사.");
+  await page.getByRole("button", { name: "로그아웃", exact: true }).click();
+  await login(page, "123", "1234");
+  await expect(page.locator(".account-card [role=alert]")).toContainText(
+    "변경 전 아이디",
+  );
+  await login(page, "공부하는나", "1234");
+  await expect(editor).toHaveValue("계정 이름을 바꿔도 남아 있는 필사.");
+  await page
+    .getByRole("button", { name: "공부하는나 계정 설정", exact: true })
+    .click();
+  await editor.evaluate((e) => e.setAttribute("data-kept", "password-check"));
+  await dialog
+    .getByRole("button", { name: "비밀번호 변경", exact: true })
+    .click();
+  await dialog.getByLabel("현재 비밀번호", { exact: true }).fill("1234");
+  await dialog.getByLabel("새 비밀번호", { exact: true }).fill("5678");
+  await dialog.getByLabel("새 비밀번호 확인", { exact: true }).fill("5679");
+  await dialog.getByRole("button", { name: "변경 사항 저장" }).click();
+  await expect(dialog.getByRole("alert")).toContainText("서로 다릅니다");
+  await dialog.getByLabel("새 비밀번호 확인", { exact: true }).fill("5678");
+  await dialog.getByRole("button", { name: "변경 사항 저장" }).click();
+  await expect(dialog.getByRole("status")).toContainText(
+    "비밀번호를 변경했습니다",
+  );
+  await expect(editor).toHaveAttribute("data-kept", "password-check");
+  await dialog.getByRole("button", { name: "계정 설정 닫기" }).click();
+  await page.getByRole("button", { name: "로그아웃", exact: true }).click();
+  await login(page, "공부하는나", "1234");
+  await expect(page.locator(".account-card [role=alert]")).toContainText(
+    "비밀번호를 확인",
+  );
+  await login(page, "공부하는나", "5678");
+  await expect(editor).toHaveValue("계정 이름을 바꿔도 남아 있는 필사.");
+  await expect(
+    page.getByRole("img", { name: "PDF 원본 1페이지", exact: true }),
+  ).toBeVisible();
+  expect(service.notes.size).toBe(1);
+  expect([...service.notes.values()][0].owner_id).toBe(originalOwner);
+  expect(service.documents.size).toBe(1);
+  await context.close();
+});
+
+test("설정 SQL이 없는 기존 계정도 로그인·비밀번호 변경 가능하고 아이디 변경은 안내한다", async ({
+  browser,
+  baseURL,
+}) => {
+  const service = backend({ missingSetup: true });
+  const context = await browser.newContext({ baseURL });
+  await service.install(context);
+  const page = await context.newPage();
+  await login(page, "기존계정", "1234");
+  await page
+    .getByRole("button", { name: "기존계정 계정 설정", exact: true })
+    .click();
+  const dialog = page.getByRole("dialog", { name: "계정 설정" });
+  await dialog.getByLabel("현재 비밀번호", { exact: true }).fill("1234");
+  await dialog.getByLabel("새 아이디", { exact: true }).fill("새이름");
+  await dialog.getByRole("button", { name: "변경 사항 저장" }).click();
+  await expect(dialog.getByRole("alert")).toContainText("account-settings.sql");
+  await dialog
+    .getByRole("button", { name: "비밀번호 변경", exact: true })
+    .click();
+  await dialog.getByLabel("현재 비밀번호", { exact: true }).fill("1234");
+  await dialog.getByLabel("새 비밀번호", { exact: true }).fill("4321");
+  await dialog.getByLabel("새 비밀번호 확인", { exact: true }).fill("4321");
+  await dialog.getByRole("button", { name: "변경 사항 저장" }).click();
+  await expect(dialog.getByRole("status")).toContainText(
+    "비밀번호를 변경했습니다",
+  );
+  await dialog.getByRole("button", { name: "계정 설정 닫기" }).click();
+  await page.getByRole("button", { name: "로그아웃", exact: true }).click();
+  await login(page, "기존계정", "4321");
+  await expect(
+    page.getByRole("button", { name: "로그아웃", exact: true }),
+  ).toBeVisible();
+  await context.close();
+});
+
+test("다른 계정 아이디는 가져오지 못하고 모바일 설정에서도 계정 창을 열고 닫는다", async ({
+  browser,
+  baseURL,
+}) => {
+  const service = backend();
+  const first = await browser.newContext({ baseURL });
+  const second = await browser.newContext({
+    baseURL,
+    viewport: { width: 390, height: 844 },
+  });
+  await service.install(first);
+  await service.install(second);
+  const a = await first.newPage(),
+    b = await second.newPage();
+  await login(a, "사용중인아이디", "1234");
+  await expect(
+    a.getByRole("button", { name: "로그아웃", exact: true }),
+  ).toBeVisible();
+  await login(b, "내아이디", "4321");
+  await b.getByRole("button", { name: "설정", exact: true }).click();
+  await b
+    .getByRole("button", { name: "아이디·비밀번호 변경", exact: true })
+    .click();
+  const dialog = b.getByRole("dialog", { name: "계정 설정" });
+  await dialog.getByLabel("현재 비밀번호", { exact: true }).fill("4321");
+  await dialog.getByLabel("새 아이디", { exact: true }).fill("사용중인아이디");
+  await dialog.getByRole("button", { name: "변경 사항 저장" }).click();
+  await expect(dialog.getByRole("alert")).toContainText("이미 사용 중");
+  expect(await dialog.evaluate((e) => e.scrollWidth <= e.clientWidth)).toBe(
+    true,
+  );
+  await b.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+  await b
+    .getByRole("button", { name: "아이디·비밀번호 변경", exact: true })
+    .click();
+  await expect(dialog.getByLabel("현재 비밀번호", { exact: true })).toHaveValue(
+    "",
+  );
+  await expect(dialog.getByLabel("새 아이디", { exact: true })).toHaveValue(
+    "내아이디",
+  );
+  await first.close();
+  await second.close();
 });

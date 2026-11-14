@@ -10,18 +10,26 @@ import {
 } from "@/lib/cloud";
 import { createCloudRepository } from "@/lib/cloud-repository";
 import StudyApp from "./study-app";
+import AccountSettings from "./account-settings";
+import { currentUsername } from "@/lib/account-settings";
 export default function AccountApp() {
   const [session, setSession] = useState<Session | null>(null),
     [ready, setReady] = useState(!cloudConfigured),
     [username, setUsername] = useState(""),
     [password, setPassword] = useState(""),
     [busy, setBusy] = useState(false),
-    [error, setError] = useState("");
+    [error, setError] = useState(""),
+    [accountName, setAccountName] = useState(""),
+    [managingAccount, setManagingAccount] = useState(false);
   useEffect(() => {
     if (!cloudConfigured) return;
     const c = cloudClient();
     const sub = c.auth.onAuthStateChange((_event, next) => {
       setSession(next);
+      if (!next) {
+        setManagingAccount(false);
+        setAccountName("");
+      }
       setReady(true);
     });
     c.auth.getSession().then(({ data, error }) => {
@@ -33,23 +41,50 @@ export default function AccountApp() {
     return () => sub.data.subscription.unsubscribe();
   }, []);
   const owner = session?.user.id;
+  const fallbackName = session?.user.user_metadata.display_name || "나의 계정";
+  useEffect(() => {
+    let active = true;
+    if (!owner) return;
+    currentUsername(cloudClient())
+      .then((name) => {
+        if (active) setAccountName(name || fallbackName);
+      })
+      .catch(() => {
+        if (active) setAccountName(fallbackName);
+      });
+    return () => {
+      active = false;
+    };
+  }, [owner, fallbackName]);
   const repository = useMemo(
     () => (owner ? createCloudRepository(cloudClient(), owner) : null),
     [owner],
   );
   if (session && repository)
     return (
-      <StudyApp
-        key={session.user.id}
-        repository={repository}
-        accountName={session.user.user_metadata.display_name || "나의 계정"}
-        onLogout={async () => {
-          const { error } = await cloudClient().auth.signOut();
-          if (error) throw error;
-          setPassword("");
-          setSession(null);
-        }}
-      />
+      <>
+        <StudyApp
+          key={session.user.id}
+          repository={repository}
+          accountName={accountName || fallbackName}
+          onManageAccount={() => setManagingAccount(true)}
+          onLogout={async () => {
+            const { error } = await cloudClient().auth.signOut();
+            if (error) throw error;
+            setPassword("");
+            setAccountName("");
+            setManagingAccount(false);
+            setSession(null);
+          }}
+        />
+        {managingAccount && (
+          <AccountSettings
+            name={accountName || fallbackName}
+            onRename={setAccountName}
+            onClose={() => setManagingAccount(false)}
+          />
+        )}
+      </>
     );
   return (
     <main className="account-screen">
