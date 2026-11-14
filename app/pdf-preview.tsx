@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
+import { bindPdfSelection } from "@/lib/pdf-selection";
 import { pdfEnglishWords } from "@/lib/english-input";
 import type { TextLayer, PDFDocumentProxy, PDFPageProxy } from "pdfjs-dist";
 export default function PdfPreview({
@@ -38,6 +39,7 @@ export default function PdfPreview({
     let renderedPage: PDFPageProxy | undefined;
     let textLayer: TextLayer | undefined;
     let frame: HTMLDivElement | undefined;
+    let unbindSelection: (() => void) | undefined;
     async function render() {
       setLoading(true);
       setError("");
@@ -108,6 +110,8 @@ export default function PdfPreview({
                 viewport,
               });
               await textLayer.render();
+              if (cancelled) return;
+              unbindSelection = bindPdfSelection(layer);
               pdfjs.TextLayer.cleanup();
             } else
               setTextHint(
@@ -136,6 +140,7 @@ export default function PdfPreview({
     return () => {
       cancelled = true;
       task?.cancel();
+      unbindSelection?.();
       textLayer?.cancel();
       frame?.remove();
       if (canvas) {

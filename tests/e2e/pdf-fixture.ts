@@ -35,3 +35,32 @@ export async function englishPdfFixture() {
   }
   return Buffer.from(await doc.save());
 }
+
+// Newspaper drawing order deliberately differs from spatial order. Empty space
+// below the final article must not extend a selection into the article above it.
+export async function newspaperPdfFixture() {
+  const doc = await PDFDocument.create();
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const page = doc.addPage([600, 800]);
+  for (const [x, prefix] of [
+    [40, "LEFT"],
+    [320, "RIGHT"],
+  ] as const) {
+    for (let line = 0; line < 5; line++) {
+      page.drawText(`${prefix} article line ${line + 1} ends here.`, {
+        x,
+        y: 340 - line * 22,
+        font,
+        size: 12,
+      });
+    }
+  }
+  page.drawText("UPPER unrelated article", { x: 40, y: 650, font, size: 16 });
+  page.drawText("UPPER should never be selected below.", {
+    x: 40,
+    y: 620,
+    font,
+    size: 12,
+  });
+  return Buffer.from(await doc.save());
+}
