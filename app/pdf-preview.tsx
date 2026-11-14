@@ -1,5 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
+import PdfAnnotations from "./pdf-annotations";
+import type { PdfHighlight, HighlightRect } from "@/lib/study-tools";
 import { bindPdfSelection } from "@/lib/pdf-selection";
 import { pdfEnglishWords } from "@/lib/english-input";
 import type { TextLayer, PDFDocumentProxy, PDFPageProxy } from "pdfjs-dist";
@@ -8,14 +10,22 @@ export default function PdfPreview({
   number,
   zoom,
   onEnglishWords,
+  highlights = [],
+  onHighlight,
 }: {
   document: PDFDocumentProxy;
   number: number;
   zoom: number | "fit";
   onEnglishWords?: (words: string[]) => void;
+  highlights?: PdfHighlight[];
+  onHighlight?: (page: number, text: string, rects: HighlightRect[]) => void;
 }) {
   const host = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
+  const [annotationFrame, setAnnotationFrame] = useState<{
+    element: HTMLDivElement;
+    page: number;
+  } | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [textHint, setTextHint] = useState("");
@@ -76,6 +86,7 @@ export default function PdfPreview({
         frame.style.height = `${viewport.height}px`;
         frame.append(canvas);
         surface.replaceChildren(frame);
+        setAnnotationFrame({ element: frame, page: number });
         task = page.render({
           canvas,
           viewport,
@@ -156,6 +167,16 @@ export default function PdfPreview({
         {loading ? "원본 페이지를 그리는 중…" : error || ""}
       </div>
       <div className="pdf-surface" />
+      {onHighlight && (
+        <PdfAnnotations
+          frame={
+            annotationFrame?.page === number ? annotationFrame.element : null
+          }
+          page={number}
+          highlights={highlights}
+          onAdd={onHighlight}
+        />
+      )}
       {textHint && <p className="pdf-copy-note">{textHint}</p>}
       {error && <p role="alert">{error}</p>}
     </div>

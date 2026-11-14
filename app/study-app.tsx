@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useRef, useState } from "react";
 import {
   BookOpen,
   Upload,
@@ -18,6 +18,11 @@ import {
   FolderOpen,
   PenLine,
   ShieldCheck,
+  Bookmark,
+  Highlighter,
+  History,
+  PanelLeftClose,
+  PanelLeftOpen,
 } from "lucide-react";
 import type { PDFDocumentLoadingTask, PDFDocumentProxy } from "pdfjs-dist";
 import {
@@ -35,6 +40,14 @@ const localRepository: StudyRepository = { listNotebooks, saveNotebook };
 import { openPdf, pdfError } from "@/lib/pdf";
 import PdfPreview from "./pdf-preview";
 import Editor from "./transcription-editor";
+import DraftHistory from "./draft-history";
+import ReadingMarks from "./reading-marks";
+import {
+  checkpoint,
+  beforeDraftEdit,
+  restoreDraft,
+  type HighlightRect,
+} from "@/lib/study-tools";
 import { useFocusMode } from "./use-focus-mode";
 export default function StudyApp({
   repository = localRepository,
@@ -48,6 +61,8 @@ export default function StudyApp({
   onManageAccount?: () => void;
 }) {
   const [importRevision, setImportRevision] = useState(0);
+  const [showHistory, setShowHistory] = useState(false);
+  const [showMarks, setShowMarks] = useState(false);
   const [pdfReload, setPdfReload] = useState(0);
   const [pdfRestore, setPdfRestore] = useState<{
     id: string;
@@ -230,7 +245,22 @@ export default function StudyApp({
       return;
     const previous = current.current;
     if (!previous) return;
-    const next = { ...previous, ...change, updated: new Date().toISOString() };
+    let base = previous;
+    if (change.drafts && !change.history && !composing.current) {
+      for (const [page, text] of Object.entries(change.drafts))
+        if (text !== previous.drafts[page])
+          base = beforeDraftEdit(base, +page, text);
+    }
+    if (
+      change.editorPage !== undefined &&
+      change.editorPage !== previous.editorPage
+    )
+      base = checkpoint(
+        base,
+        previous.editorPage,
+        previous.drafts[previous.editorPage] || "",
+      );
+    const next = { ...base, ...change, updated: new Date().toISOString() };
     current.current = next;
     void repository
       .stageNotebook?.(next)
@@ -243,8 +273,31 @@ export default function StudyApp({
     setShelf((prev) => [next, ...prev.filter((n) => n.id !== next.id)]);
     void queue.current?.enqueue(next);
   }
+  const periodicCheckpoint = useEffectEvent(() => {
+    const n = current.current;
+    if (!n || composing.current) return;
+    const next = checkpoint(n, n.editorPage, n.drafts[n.editorPage] || "");
+    if (next !== n) update({ history: next.history });
+  });
+  useEffect(() => {
+    const timer = setInterval(() => periodicCheckpoint(), 60000);
+    return () => clearInterval(timer);
+  }, []);
   function activate(next: Notebook) {
-    if (current.current?.id !== next.id) setEnglishWords([]);
+    if (current.current?.id !== next.id) {
+      const old = current.current;
+      if (old) {
+        const saved = checkpoint(
+          old,
+          old.editorPage,
+          old.drafts[old.editorPage] || "",
+        );
+        if (saved !== old) update({ history: saved.history });
+      }
+      setEnglishWords([]);
+      setShowHistory(false);
+      setShowMarks(false);
+    }
     current.current = next;
     void repository
       .stageNotebook?.(next)
@@ -386,6 +439,41 @@ export default function StudyApp({
         split: clamp(((clientX - box.left) / box.width) * 100, 25, 75),
       });
   }
+  function addHighlight(page: number, text: string, rects: HighlightRect[]) {
+    const n = current.current;
+    if (!n || page !== n.pdfPage || !rects.length) return;
+    if (
+      (n.highlights?.length || 0) >= 500 ||
+      (n.highlights || []).reduce((sum, h) => sum + h.rects.length, 0) +
+        rects.length >
+        10000
+    ) {
+      setError(
+        "형광펜은 자료당 500개, 표시 영역 10,000개까지 남길 수 있어요. 기존 표시를 정리해 주세요.",
+      );
+      return;
+    }
+    update({
+      highlights: [
+        ...(n.highlights || []),
+        {
+          id: crypto.randomUUID(),
+          page,
+          text,
+          rects,
+          created: new Date().toISOString(),
+        },
+      ],
+    });
+  }
+  function toggleWriting() {
+    if (composing.current) return;
+    const n = current.current;
+    if (n) {
+      update({ editorOnly: !n.editorOnly });
+      setMobileTab("editor");
+    }
+  }
   const connected = !!note && attached === note.id && !!pdf;
   const restoringPdf =
     !!repository.loadPdf &&
@@ -393,7 +481,28 @@ export default function StudyApp({
     !connected &&
     (pdfRestore?.id !== note.id || pdfRestore.status === "loading");
   return (
-    <div ref={shell} className={`study-shell${focusMode ? " is-focused" : ""}`}>
+    <div
+      ref={shell}
+      className={`study-shell${focusMode ? " is-focused" : ""}${note?.editorOnly ? " editor-only" : ""}`}
+    >
+      {focusMode && note && (
+        <button
+          className="focus-history-toggle"
+          aria-label="필사 이전 버전"
+          onClick={() => setShowHistory(true)}
+        >
+          <History size={16} />
+        </button>
+      )}
+      {focusMode && note && (
+        <button
+          className="focus-writing-toggle"
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={toggleWriting}
+        >
+          {note.editorOnly ? "PDF 다시 보기" : "PDF 가리고 필사"}
+        </button>
+      )}
       {focusMode && (
         <button
           className="exit-focus"
@@ -702,6 +811,70 @@ export default function StudyApp({
           <button onClick={() => setSettings(false)}>닫기</button>
         </section>
       )}
+      {note && showHistory && (
+        <DraftHistory
+          key={`${note.id}:${note.editorPage}`}
+          page={note.editorPage}
+          text={note.drafts[note.editorPage] || ""}
+          versions={note.history?.[note.editorPage] || []}
+          onClose={() => setShowHistory(false)}
+          onCapture={() => {
+            if (composing.current)
+              throw new Error("한글 조합을 마친 뒤 보관해 주세요.");
+            const n = current.current!;
+            const text = n.drafts[n.editorPage] || "";
+            if (!text) throw new Error("먼저 필사를 입력해 주세요.");
+            const captured = checkpoint(n, n.editorPage, text, "manual");
+            if (!captured.history?.[n.editorPage]?.some((v) => v.text === text))
+              throw new Error(
+                "보관 가능한 크기(2MB)를 넘었습니다. TXT로 내보내 주세요.",
+              );
+            if (captured !== n) update({ history: captured.history });
+          }}
+          onRestore={(id) => {
+            if (composing.current)
+              throw new Error("한글 조합을 마친 뒤 복원해 주세요.");
+            const n = current.current!;
+            const restored = restoreDraft(n, n.editorPage, id);
+            update({ drafts: restored.drafts, history: restored.history });
+            setImportRevision((v) => v + 1);
+          }}
+        />
+      )}
+      {note && showMarks && (
+        <ReadingMarks
+          bookmarks={note.bookmarks || []}
+          highlights={note.highlights || []}
+          onClose={() => setShowMarks(false)}
+          onGo={(page) => {
+            if (composing.current) return;
+            update({ editorOnly: false });
+            navigate(page);
+            setMobileTab("pdf");
+            setShowMarks(false);
+          }}
+          onRename={(page, label) => {
+            const n = current.current!;
+            update({
+              bookmarks: (n.bookmarks || []).map((b) =>
+                b.page === page ? { ...b, label } : b,
+              ),
+            });
+          }}
+          onDeleteBookmark={(page) => {
+            const n = current.current!;
+            update({
+              bookmarks: (n.bookmarks || []).filter((b) => b.page !== page),
+            });
+          }}
+          onDeleteHighlight={(id) => {
+            const n = current.current!;
+            update({
+              highlights: (n.highlights || []).filter((h) => h.id !== id),
+            });
+          }}
+        />
+      )}
       {note ? (
         <>
           <div className="document-toolbar">
@@ -842,7 +1015,10 @@ export default function StudyApp({
           <nav className="mobile-tabs" aria-label="공부 화면">
             <button
               className={mobileTab === "pdf" ? "active" : ""}
-              onClick={() => setMobileTab("pdf")}
+              onClick={() => {
+                if (note.editorOnly) update({ editorOnly: false });
+                setMobileTab("pdf");
+              }}
             >
               PDF 보기
             </button>
@@ -898,6 +1074,33 @@ export default function StudyApp({
                     : ""}
                 </small>
               </div>
+              <div className="pdf-mark-tools">
+                <button
+                  aria-label="현재 페이지 책갈피"
+                  aria-pressed={
+                    note.bookmarks?.some((b) => b.page === note.pdfPage) ??
+                    false
+                  }
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => {
+                    const n = current.current!;
+                    const marks = n.bookmarks || [];
+                    update({
+                      bookmarks: marks.some((b) => b.page === n.pdfPage)
+                        ? marks.filter((b) => b.page !== n.pdfPage)
+                        : [
+                            ...marks,
+                            { page: n.pdfPage, label: `${n.pdfPage}페이지` },
+                          ],
+                    });
+                  }}
+                >
+                  <Bookmark size={14} /> 책갈피
+                </button>
+                <button onClick={() => setShowMarks(true)}>
+                  <Highlighter size={14} /> 표시 목록
+                </button>
+              </div>
               <div
                 ref={pdfScroll}
                 className="pdf-scroll"
@@ -914,6 +1117,8 @@ export default function StudyApp({
                     number={note.pdfPage}
                     zoom={note.zoom}
                     onEnglishWords={setEnglishWords}
+                    highlights={note.highlights}
+                    onHighlight={addHighlight}
                   />
                 ) : restoringPdf ? (
                   <div className="reconnect" role="status" aria-live="polite">
@@ -1002,6 +1207,29 @@ export default function StudyApp({
                   <PenLine size={15} /> 나의 필사
                 </span>
                 <div>
+                  <button
+                    title="페이지별 필사 이전 버전"
+                    aria-label="필사 이전 버전"
+                    onClick={() => setShowHistory(true)}
+                  >
+                    <History size={14} />
+                  </button>
+                  <button
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={toggleWriting}
+                    aria-label={
+                      note.editorOnly ? "PDF 다시 보기" : "PDF 가리고 필사"
+                    }
+                  >
+                    {note.editorOnly ? (
+                      <PanelLeftOpen size={14} />
+                    ) : (
+                      <PanelLeftClose size={14} />
+                    )}
+                    <span className="writing-label">
+                      {note.editorOnly ? "PDF 다시 보기" : "PDF 가리기"}
+                    </span>
+                  </button>
                   {!note.followPage && (
                     <span className="pinned">페이지 고정</span>
                   )}

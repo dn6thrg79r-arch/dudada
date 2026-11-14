@@ -778,3 +778,102 @@ test("접속 즉시 마지막 PDF를 불러오고 다운로드 중에는 재연�
     await context.close();
   }
 });
+
+test("형광펜·책갈피·이전 버전·PDF 가리기를 같은 계정의 다른 브라우저에서 이어 쓴다", async ({
+  browser,
+  baseURL,
+}) => {
+  const service = backend();
+  const first = await browser.newContext({ baseURL }),
+    second = await browser.newContext({ baseURL });
+  await service.install(first);
+  await service.install(second);
+  const a = await first.newPage(),
+    b = await second.newPage();
+  try {
+    await login(a, "공부도구공유", "1234");
+    await upload(a);
+    const text = a
+      .locator(".pdf-text-layer span")
+      .filter({ hasText: "간호사 12 (ICU)." })
+      .first();
+    await expect(text).toBeVisible();
+    await text.evaluate((e) => {
+      const range = document.createRange();
+      range.selectNodeContents(e);
+      const selection = window.getSelection()!;
+      selection.removeAllRanges();
+      selection.addRange(range);
+    });
+    await a
+      .getByRole("button", { name: "선택한 글에 형광펜", exact: true })
+      .click();
+    await a
+      .getByRole("button", { name: "현재 페이지 책갈피", exact: true })
+      .click();
+    const editor = a.getByRole("textbox", { name: "필사 편집기" });
+    const original = "다른 기기에서도 복원할 수 있는 필사 원문입니다.";
+    await editor.fill(original);
+    await a
+      .getByRole("button", { name: "필사 이전 버전", exact: true })
+      .click();
+    const history = a.getByRole("dialog", { name: "1페이지 이전 버전" });
+    await history
+      .getByRole("button", { name: "지금 버전 보관", exact: true })
+      .click();
+    await expect(history.getByLabel("이전 필사 미리보기")).toHaveValue(
+      original,
+    );
+    await history.getByRole("button", { name: "닫기", exact: true }).click();
+    await editor.fill("현재 기기에서 고친 글");
+    await a
+      .getByRole("button", { name: "PDF 가리고 필사", exact: true })
+      .click();
+    await expect(a.locator(".save-state")).toHaveAttribute(
+      "data-save-state",
+      "saved",
+    );
+    await login(b, "공부도구공유", "1234");
+    await expect(b.getByRole("textbox", { name: "필사 편집기" })).toHaveValue(
+      "현재 기기에서 고친 글",
+    );
+    await expect(
+      b.getByRole("region", { name: "PDF 뷰어", exact: true }),
+    ).toBeHidden();
+    await b.getByRole("button", { name: "PDF 다시 보기", exact: true }).click();
+    await expect(b.locator(".pdf-highlights span").first()).toBeVisible();
+    await expect(
+      b.getByRole("button", { name: "현재 페이지 책갈피", exact: true }),
+    ).toHaveAttribute("aria-pressed", "true");
+    await b
+      .getByRole("button", { name: "필사 이전 버전", exact: true })
+      .click();
+    const restored = b.getByRole("dialog", { name: "1페이지 이전 버전" });
+    await expect(restored.getByLabel("이전 필사 미리보기")).toHaveValue(
+      original,
+    );
+    await restored
+      .getByRole("button", { name: "이 버전으로 복원", exact: true })
+      .click();
+    await expect(b.getByRole("textbox", { name: "필사 편집기" })).toHaveValue(
+      original,
+    );
+    await restored.getByRole("button", { name: "닫기", exact: true }).click();
+    await expect(b.locator(".save-state")).toHaveAttribute(
+      "data-save-state",
+      "saved",
+    );
+    expect(service.notes.size).toBe(1);
+    await b.getByRole("button", { name: "로그아웃", exact: true }).click();
+    await login(b, "다른공부도구계정", "1234");
+    await expect(
+      b.getByRole("heading", { name: "읽고, 천천히 옮겨 적어요." }),
+    ).toBeVisible();
+    await expect(
+      b.getByRole("button", { name: "필사 이전 버전", exact: true }),
+    ).toHaveCount(0);
+  } finally {
+    await first.close();
+    await second.close();
+  }
+});

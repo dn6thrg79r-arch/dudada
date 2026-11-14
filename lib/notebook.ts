@@ -1,3 +1,4 @@
+import type { PdfHighlight, Bookmark, DraftVersion } from "./study-tools";
 export type Notebook = {
   id: string;
   title: string;
@@ -15,6 +16,10 @@ export type Notebook = {
   updated: string;
   legacyText?: string;
   autoEnglish?: boolean;
+  highlights?: PdfHighlight[];
+  bookmarks?: Bookmark[];
+  history?: Record<string, DraftVersion[]>;
+  editorOnly?: boolean;
 };
 export function createNotebook(
   name: string,

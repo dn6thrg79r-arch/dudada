@@ -1142,3 +1142,162 @@ input:not([type="file"]):not([type="checkbox"]) {
 .pdf-text-layer br::selection {
   background: transparent;
 }
+
+.pdf-text-layer {
+  z-index: 2;
+}
+.pdf-highlights {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1;
+}
+.pdf-highlights span {
+  position: absolute;
+  background: rgb(255 217 35 / 40%);
+  mix-blend-mode: multiply;
+}
+.highlight-action {
+  position: absolute;
+  z-index: 5;
+  transform: translateY(-110%);
+  background: #fff5b0;
+  color: #493e15;
+  box-shadow: 0 2px 9px #0002;
+}
+.pdf-mark-tools {
+  display: flex;
+  flex-shrink: 0;
+  gap: 6px;
+  padding: 4px 16px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--line);
+}
+.pdf-mark-tools button {
+  padding: 4px 8px;
+  font-size: 11px;
+}
+.pdf-mark-tools button[aria-pressed="true"] {
+  background: var(--soft);
+  color: var(--green);
+}
+.study-dialog {
+  position: fixed;
+  margin: auto;
+  width: min(720px, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px);
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 24px;
+  color: var(--ink);
+  background: var(--paper);
+}
+.study-dialog::backdrop {
+  background: rgb(15 30 22 / 40%);
+}
+.study-dialog h3 {
+  font-size: 15px;
+  margin: 22px 0 10px;
+}
+.study-dialog p {
+  font-size: 13px;
+  color: var(--muted);
+}
+.mark-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin: 10px 0;
+}
+.mark-row input {
+  min-width: 0;
+  flex: 1;
+}
+.highlight-excerpt {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  justify-content: start;
+  white-space: normal;
+}
+.highlight-excerpt span {
+  overflow-wrap: anywhere;
+}
+.history-content {
+  display: grid;
+  grid-template-columns: minmax(150px, 0.7fr) minmax(0, 1fr);
+  gap: 16px;
+  margin: 18px 0;
+}
+.version-list {
+  max-height: 300px;
+  overflow: auto;
+}
+.version-list button {
+  display: flex;
+  flex-direction: column;
+  align-items: start;
+  white-space: normal;
+  width: 100%;
+  margin-bottom: 6px;
+}
+.version-list small {
+  color: var(--muted);
+}
+.version-list button[aria-pressed="true"] {
+  background: var(--soft);
+  border-color: var(--green);
+}
+.history-content textarea {
+  width: 100%;
+  min-height: 240px;
+  resize: vertical;
+  padding: 14px;
+  background: var(--bg);
+  line-height: 1.8;
+}
+.focus-writing-toggle,
+.focus-history-toggle {
+  position: absolute;
+  top: 12px;
+  z-index: 30;
+  opacity: 0.8;
+}
+.focus-writing-toggle {
+  right: 62px;
+}
+.focus-history-toggle {
+  right: 200px;
+}
+.study-shell.editor-only .split-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+}
+.study-shell.editor-only .pdf-pane,
+.study-shell.editor-only .split-handle {
+  display: none;
+}
+.study-shell.editor-only .editor-pane {
+  display: flex;
+  width: 100%;
+}
+.study-shell.editor-only .manuscript {
+  padding-left: max(28px, calc((100% - 900px) / 2));
+  padding-right: max(28px, calc((100% - 900px) / 2));
+}
+@media (max-width: 600px) {
+  .history-content {
+    grid-template-columns: 1fr;
+  }
+  .version-list {
+    max-height: 150px;
+  }
+  .study-dialog {
+    padding: 18px;
+  }
+  .writing-label {
+    display: none;
+  }
+}
