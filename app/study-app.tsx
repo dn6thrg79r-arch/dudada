@@ -16,10 +16,8 @@ import {
   Sun,
   Moon,
   FolderOpen,
-  PenLine,
   ShieldCheck,
   Bookmark,
-  Highlighter,
   History,
   PanelLeftClose,
   PanelLeftOpen,
@@ -488,6 +486,7 @@ export default function StudyApp({
       {focusMode && note && (
         <button
           className="focus-history-toggle"
+          title="필사 이전 버전"
           aria-label="필사 이전 버전"
           onClick={() => setShowHistory(true)}
         >
@@ -497,10 +496,16 @@ export default function StudyApp({
       {focusMode && note && (
         <button
           className="focus-writing-toggle"
+          title={note.editorOnly ? "PDF 다시 보기" : "PDF 가리고 필사"}
+          aria-label={note.editorOnly ? "PDF 다시 보기" : "PDF 가리고 필사"}
           onMouseDown={(e) => e.preventDefault()}
           onClick={toggleWriting}
         >
-          {note.editorOnly ? "PDF 다시 보기" : "PDF 가리고 필사"}
+          {note.editorOnly ? (
+            <PanelLeftOpen size={16} />
+          ) : (
+            <PanelLeftClose size={16} />
+          )}
         </button>
       )}
       {focusMode && (
@@ -753,6 +758,69 @@ export default function StudyApp({
             />
             한글 → 영문 자동 변환
           </label>
+          <label>
+            필사 페이지
+            <select
+              aria-label="필사 페이지"
+              disabled={!note || note.followPage}
+              value={note?.editorPage || 1}
+              onChange={(e) => update({ editorPage: +e.target.value })}
+            >
+              {Array.from({ length: note?.pageCount || 0 }, (_, i) => (
+                <option key={i} value={i + 1}>
+                  {i + 1}페이지 필사
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="import-text">
+            필사 파일 불러오기
+            <input
+              type="file"
+              accept=".txt,.md,text/plain,text/markdown"
+              disabled={!note}
+              aria-label="필사 파일 불러오기"
+              onChange={async (e) => {
+                const f = e.target.files?.[0];
+                e.target.value = "";
+                if (!f) return;
+                if (f.size > 10 * 1024 * 1024) {
+                  setError("필사 파일은 10MB 이하로 나눠 주세요.");
+                  return;
+                }
+                try {
+                  const text = await f.text();
+                  const n = current.current;
+                  if (!n) return;
+                  if (
+                    n.drafts[n.editorPage] &&
+                    !confirm(
+                      "현재 페이지 필사를 불러온 파일로 바꿀까요? 내보내기로 먼저 보관할 수 있습니다.",
+                    )
+                  )
+                    return;
+                  // Replace using a new revision key only for an explicit file import.
+                  update({
+                    drafts: { ...n.drafts, [n.editorPage]: text },
+                  });
+                  setImportRevision((v) => v + 1);
+                } catch {
+                  setError(
+                    "필사 파일을 읽지 못했습니다. UTF-8 TXT 또는 Markdown 파일로 다시 선택해 주세요.",
+                  );
+                }
+              }}
+            />
+          </label>
+          <button
+            disabled={!note}
+            onClick={() => {
+              setSettings(false);
+              setShowMarks(true);
+            }}
+          >
+            책갈피·형광펜 관리
+          </button>
           <button onClick={theme}>
             {dark ? <Sun size={16} /> : <Moon size={16} />}{" "}
             {dark ? "밝은 화면" : "다크 모드"}
@@ -925,6 +993,52 @@ export default function StudyApp({
               >
                 <ChevronRight size={18} />
               </button>
+              <button
+                className="toolbar-icon"
+                title="현재 페이지 책갈피"
+                aria-label="현재 페이지 책갈피"
+                aria-pressed={
+                  note.bookmarks?.some((b) => b.page === note.pdfPage) ?? false
+                }
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => {
+                  const n = current.current!;
+                  const marks = n.bookmarks || [];
+                  update({
+                    bookmarks: marks.some((b) => b.page === n.pdfPage)
+                      ? marks.filter((b) => b.page !== n.pdfPage)
+                      : [
+                          ...marks,
+                          { page: n.pdfPage, label: `${n.pdfPage}페이지` },
+                        ],
+                  });
+                }}
+              >
+                <Bookmark size={16} />
+              </button>
+              <button
+                className="toolbar-icon"
+                title={note.editorOnly ? "PDF 다시 보기" : "PDF 가리고 필사"}
+                aria-label={
+                  note.editorOnly ? "PDF 다시 보기" : "PDF 가리고 필사"
+                }
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={toggleWriting}
+              >
+                {note.editorOnly ? (
+                  <PanelLeftOpen size={16} />
+                ) : (
+                  <PanelLeftClose size={16} />
+                )}
+              </button>
+              <button
+                className="toolbar-icon"
+                title="필사 이전 버전"
+                aria-label="필사 이전 버전"
+                onClick={() => setShowHistory(true)}
+              >
+                <History size={16} />
+              </button>
             </div>
             <div
               className="zoom-controls"
@@ -1078,42 +1192,6 @@ export default function StudyApp({
                   </button>
                 </nav>
               )}
-              <div className="pane-heading">
-                <span>원본 읽기</span>
-                <small>
-                  {note.pdfPage}페이지{" "}
-                  {note.fileSize && note.fileSize >= 100 * 1024 * 1024
-                    ? " · 대용량 파일, 필요한 페이지만 표시해요"
-                    : ""}
-                </small>
-              </div>
-              <div className="pdf-mark-tools">
-                <button
-                  aria-label="현재 페이지 책갈피"
-                  aria-pressed={
-                    note.bookmarks?.some((b) => b.page === note.pdfPage) ??
-                    false
-                  }
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => {
-                    const n = current.current!;
-                    const marks = n.bookmarks || [];
-                    update({
-                      bookmarks: marks.some((b) => b.page === n.pdfPage)
-                        ? marks.filter((b) => b.page !== n.pdfPage)
-                        : [
-                            ...marks,
-                            { page: n.pdfPage, label: `${n.pdfPage}페이지` },
-                          ],
-                    });
-                  }}
-                >
-                  <Bookmark size={14} /> 책갈피
-                </button>
-                <button onClick={() => setShowMarks(true)}>
-                  <Highlighter size={14} /> 표시 목록
-                </button>
-              </div>
               <div
                 ref={pdfScroll}
                 className="pdf-scroll"
@@ -1215,54 +1293,6 @@ export default function StudyApp({
               <span />
             </div>
             <section className="editor-pane" aria-label="자유 필사">
-              <div className="pane-heading">
-                <span>
-                  <PenLine size={15} /> 나의 필사
-                </span>
-                <div>
-                  <button
-                    title="페이지별 필사 이전 버전"
-                    aria-label="필사 이전 버전"
-                    onClick={() => setShowHistory(true)}
-                  >
-                    <History size={14} />
-                  </button>
-                  <button
-                    onMouseDown={(e) => e.preventDefault()}
-                    onClick={toggleWriting}
-                    aria-label={
-                      note.editorOnly ? "PDF 다시 보기" : "PDF 가리고 필사"
-                    }
-                  >
-                    {note.editorOnly ? (
-                      <PanelLeftOpen size={14} />
-                    ) : (
-                      <PanelLeftClose size={14} />
-                    )}
-                    <span className="writing-label">
-                      {note.editorOnly ? "PDF 다시 보기" : "PDF 가리기"}
-                    </span>
-                  </button>
-                  {!note.followPage && (
-                    <span className="pinned">페이지 고정</span>
-                  )}
-                  <label>
-                    <span className="sr-only">필사 페이지</span>
-                    <select
-                      aria-label="필사 페이지"
-                      disabled={note.followPage}
-                      value={note.editorPage}
-                      onChange={(e) => update({ editorPage: +e.target.value })}
-                    >
-                      {Array.from({ length: note.pageCount }, (_, i) => (
-                        <option key={i} value={i + 1}>
-                          {i + 1}페이지 필사
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                </div>
-              </div>
               <Editor
                 key={`${note.id}:${note.editorPage}:${importRevision}`}
                 initial={note.drafts[note.editorPage] || ""}
@@ -1278,47 +1308,6 @@ export default function StudyApp({
                     update({ drafts: { ...n.drafts, [n.editorPage]: text } });
                 }}
               />
-              <div className="editor-foot">
-                <span>내 속도로, 한 문장씩.</span>
-                <label className="import-text">
-                  필사 파일 불러오기
-                  <input
-                    type="file"
-                    accept=".txt,.md,text/plain,text/markdown"
-                    aria-label="필사 파일 불러오기"
-                    onChange={async (e) => {
-                      const f = e.target.files?.[0];
-                      e.target.value = "";
-                      if (!f) return;
-                      if (f.size > 10 * 1024 * 1024) {
-                        setError("필사 파일은 10MB 이하로 나눠 주세요.");
-                        return;
-                      }
-                      try {
-                        const text = await f.text();
-                        const n = current.current;
-                        if (!n) return;
-                        if (
-                          n.drafts[n.editorPage] &&
-                          !confirm(
-                            "현재 페이지 필사를 불러온 파일로 바꿀까요? 내보내기로 먼저 보관할 수 있습니다.",
-                          )
-                        )
-                          return;
-                        // Replace using a new revision key only for an explicit file import.
-                        update({
-                          drafts: { ...n.drafts, [n.editorPage]: text },
-                        });
-                        setImportRevision((v) => v + 1);
-                      } catch {
-                        setError(
-                          "필사 파일을 읽지 못했습니다. UTF-8 TXT 또는 Markdown 파일로 다시 선택해 주세요.",
-                        );
-                      }
-                    }}
-                  />
-                </label>
-              </div>
             </section>
           </main>
         </>

@@ -91,9 +91,14 @@ test("페이지 연결 해제·분할 드래그·글씨 크기를 저장한다",
   await page.getByRole("button", { name: "닫기", exact: true }).click();
   await page.getByRole("button", { name: "다음 페이지", exact: true }).click();
   await expect(editor(page)).toHaveValue("참고하며 쓰는 글");
+  await page.getByRole("button", { name: "설정", exact: true }).click();
   await expect(page.getByLabel("필사 페이지", { exact: true })).toHaveValue(
     "1",
   );
+  await page
+    .getByRole("region", { name: "공부방 설정" })
+    .getByRole("button", { name: "닫기", exact: true })
+    .click();
   const handle = page.getByRole("separator", { name: "좌우 영역 크기 조절" });
   const box = (await handle.boundingBox())!;
   await page.mouse.move(box.x + 4, box.y + 100);
@@ -106,9 +111,14 @@ test("페이지 연결 해제·분할 드래그·글씨 크기를 저장한다",
   await expect(editor(page)).toHaveValue("참고하며 쓰는 글");
   await expect(editor(page)).toHaveCSS("font-size", "26px");
   await expect(page.getByLabel("현재 PDF 페이지")).toHaveValue("2");
+  await page.getByRole("button", { name: "설정", exact: true }).click();
   await expect(page.getByLabel("필사 페이지", { exact: true })).toHaveValue(
     "1",
   );
+  await page
+    .getByRole("region", { name: "공부방 설정" })
+    .getByRole("button", { name: "닫기", exact: true })
+    .click();
 });
 test("한글 조합, 네이티브 실행 취소·다시 실행, 편집기 DOM과 커서 유지", async ({
   page,
@@ -220,12 +230,17 @@ test("TXT·Markdown 가져오기와 내보내기, 스마트폰 탭·iPad 배치"
   page,
 }, info) => {
   await openPdf(page);
+  await page.getByRole("button", { name: "설정", exact: true }).click();
   await page.getByLabel("필사 파일 불러오기", { exact: true }).setInputFiles({
     name: "기존필사.md",
     mimeType: "text/markdown",
     buffer: Buffer.from("## 나의 필사\n\n한국어와 ICU 12명."),
   });
   await expect(editor(page)).toHaveValue("## 나의 필사\n\n한국어와 ICU 12명.");
+  await page
+    .getByRole("region", { name: "공부방 설정" })
+    .getByRole("button", { name: "닫기", exact: true })
+    .click();
   for (const size of [
     { width: 1024, height: 768 },
     { width: 768, height: 1024 },

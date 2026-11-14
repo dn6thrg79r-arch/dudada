@@ -52,7 +52,10 @@ test("원문 형광펜과 이름 있는 책갈피를 저장하고 확대·페이
   await expect(
     page.getByRole("button", { name: "현재 페이지 책갈피", exact: true }),
   ).toHaveAttribute("aria-pressed", "true");
-  await page.getByRole("button", { name: "표시 목록", exact: true }).click();
+  await page.getByRole("button", { name: "설정", exact: true }).click();
+  await page
+    .getByRole("button", { name: "책갈피·형광펜 관리", exact: true })
+    .click();
   const dialog = page.getByRole("dialog", { name: "책갈피와 형광펜" });
   await dialog.getByLabel("1페이지 책갈피 이름").fill("다시 읽을 기사");
   await page.screenshot({ path: info.outputPath("reading-marks.png") });
@@ -75,7 +78,10 @@ test("원문 형광펜과 이름 있는 책갈피를 저장하고 확대·페이
   expect(Math.abs(t.x - h.x)).toBeLessThan(3);
   await page.getByRole("button", { name: "다음 페이지", exact: true }).click();
   await expect(page.locator(".pdf-highlights span")).toHaveCount(0);
-  await page.getByRole("button", { name: "표시 목록", exact: true }).click();
+  await page.getByRole("button", { name: "설정", exact: true }).click();
+  await page
+    .getByRole("button", { name: "책갈피·형광펜 관리", exact: true })
+    .click();
   await dialog
     .getByRole("button", { name: "1페이지 책갈피로 이동", exact: true })
     .click();
@@ -89,7 +95,10 @@ test("원문 형광펜과 이름 있는 책갈피를 저장하고 확대·페이
     buffer,
   });
   await expect(marked).toBeAttached();
-  await page.getByRole("button", { name: "표시 목록", exact: true }).click();
+  await page.getByRole("button", { name: "설정", exact: true }).click();
+  await page
+    .getByRole("button", { name: "책갈피·형광펜 관리", exact: true })
+    .click();
   await expect(dialog.getByLabel("1페이지 책갈피 이름")).toHaveValue(
     "다시 읽을 기사",
   );
