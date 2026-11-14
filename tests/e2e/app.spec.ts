@@ -477,3 +477,96 @@ test("전체화면의 작은 버튼으로 페이지를 이동하고 페이지별
   ).toBeDisabled();
   await expect(page.locator(".app-header")).toBeHidden();
 });
+
+test("PDF 원본 글자를 마우스로 선택하고 확대·쪽 이동 후에도 선택 영역이 맞는다", async ({
+  page,
+  context,
+}) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  await openPdf(page);
+  let text = page
+    .locator(".pdf-text-layer span")
+    .filter({ hasText: "간호사 12 (ICU)." })
+    .first();
+  await expect(text).toBeVisible();
+  const box = (await text.boundingBox())!;
+  await page.mouse.move(box.x + 1, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width - 1, box.y + box.height / 2, {
+    steps: 12,
+  });
+  await page.mouse.up();
+  expect(
+    await page.evaluate(() => window.getSelection()?.toString()),
+  ).toContain("간호사");
+  await page.keyboard.press("ControlOrMeta+c");
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toContain(
+    "간호사",
+  );
+  await page.getByLabel("PDF 확대 비율").selectOption("200");
+  text = page
+    .locator(".pdf-text-layer span")
+    .filter({ hasText: "간호사 12 (ICU)." })
+    .first();
+  await expect(text).toBeVisible();
+  expect((await text.boundingBox())!.width).toBeGreaterThan(box.width);
+  await page.getByRole("button", { name: "다음 페이지", exact: true }).click();
+  await expect(page.locator(".pdf-text-layer")).toContainText("Page 2");
+  await expect(page.locator(".pdf-text-layer")).not.toContainText("Page 1");
+  await expect(page.locator(".pdf-text-layer")).toHaveCount(1);
+});
+test("한/영 오타 변환은 원문 영단어만 조합 완료 후 바꾸며 직접 변환·실행 취소도 가능하다", async ({
+  page,
+}) => {
+  const { englishPdfFixture } = await import("./pdf-fixture");
+  await page.goto("./local/");
+  await page.getByLabel("PDF 파일 선택").setInputFiles({
+    name: "의학영문.pdf",
+    mimeType: "application/pdf",
+    buffer: await englishPdfFixture(),
+  });
+  await expect(page.locator(".pdf-text-layer")).toContainText("VPS26A");
+  const area = editor(page);
+  await expect(page.getByLabel("영문 자동 변환")).not.toBeChecked();
+  await page.getByLabel("영문 자동 변환").check();
+  await area.fill("세포 막단백질의 골지 우회 경로에서 펜26ㅁ와 ");
+  await expect(area).toHaveValue(
+    "세포 막단백질의 골지 우회 경로에서 VPS26A와 ",
+  );
+  await area.press("End");
+  await page.keyboard.insertText("눝27이 ");
+  await expect(area).toHaveValue(
+    "세포 막단백질의 골지 우회 경로에서 VPS26A와 SNX27이 ",
+  );
+  await area.dispatchEvent("compositionstart");
+  await area.fill("ㅗㄷㅁㄱ ");
+  await expect(area).toHaveValue("ㅗㄷㅁㄱ ");
+  await area.dispatchEvent("compositionend", { data: "ㅗㄷㅁㄱ" });
+  await area.press("End");
+  await page.keyboard.insertText(" ");
+  await expect(area).toHaveValue("hear  ");
+  await area.fill("대규모 3상 임상시험인 ㅗㄷㅁㄱ ");
+  await area.press("End");
+  await page.keyboard.insertText("환자 데이터에서 ㅗㄱ과 ");
+  await page.keyboard.insertText("ㅗㄷㄱ2 ");
+  await expect(area).toHaveValue(
+    "대규모 3상 임상시험인 hear 환자 데이터에서 HR과 HER2 ",
+  );
+  await area.fill("ㅗㄱ ");
+  await expect(area).toHaveValue("HR ");
+  await area.press("ControlOrMeta+z");
+  await expect(area).toHaveValue("ㅗㄱ ");
+  await area.press("ControlOrMeta+Shift+z");
+  await expect(area).toHaveValue("HR ");
+  await page.getByLabel("영문 자동 변환").uncheck();
+  await area.fill("해");
+  await area.selectText();
+  await page.getByRole("button", { name: "한글 → 영문", exact: true }).click();
+  await expect(area).toHaveValue("go");
+  await area.press("ControlOrMeta+z");
+  await expect(area).toHaveValue("해");
+  await saved(page);
+  await page.reload();
+  await expect(area).toHaveValue("해");
+  await expect(page.getByLabel("영문 자동 변환")).not.toBeChecked();
+});

@@ -19,3 +19,19 @@ export async function pdfFixture(blank = false, large = false) {
     doc.context.register(doc.context.stream(new Uint8Array(101 * 1024 * 1024)));
   return Buffer.from(await doc.save());
 }
+
+export async function englishPdfFixture() {
+  const doc = await PDFDocument.create();
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  for (let i = 1; i <= 2; i++) {
+    const page = doc.addPage([600, 800]);
+    page.drawText("VPS26A SNX27 hear HR HER2", {
+      x: 40,
+      y: 700,
+      font,
+      size: 16,
+    });
+    page.drawText(`English page ${i}`, { x: 40, y: 650, font, size: 12 });
+  }
+  return Buffer.from(await doc.save());
+}

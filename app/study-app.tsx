@@ -47,6 +47,7 @@ export default function StudyApp({
 }) {
   const [importRevision, setImportRevision] = useState(0);
   const [pdfReload, setPdfReload] = useState(0);
+  const [englishWords, setEnglishWords] = useState<string[]>([]);
   const [note, setNote] = useState<Notebook | null>(null),
     [shelf, setShelf] = useState<Notebook[]>([]),
     [ready, setReady] = useState(false);
@@ -213,6 +214,7 @@ export default function StudyApp({
     void queue.current?.enqueue(next);
   }
   function activate(next: Notebook) {
+    if (current.current?.id !== next.id) setEnglishWords([]);
     current.current = next;
     void repository
       .stageNotebook?.(next)
@@ -327,6 +329,7 @@ export default function StudyApp({
     if (composing.current) return;
     const n = current.current;
     if (!n) return;
+    setEnglishWords([]);
     update(turnPage(n, page));
     pdfScroll.current?.scrollTo({ top: 0, left: 0 });
   }
@@ -632,6 +635,7 @@ export default function StudyApp({
                   await task.current?.destroy();
                   task.current = null;
                   attachedId.current = null;
+                  setEnglishWords([]);
                   setPdf(null);
                   setAttached(null);
                 } catch (e) {
@@ -863,6 +867,7 @@ export default function StudyApp({
                     document={pdf!}
                     number={note.pdfPage}
                     zoom={note.zoom}
+                    onEnglishWords={setEnglishWords}
                   />
                 ) : (
                   <div className="reconnect">
@@ -878,6 +883,7 @@ export default function StudyApp({
                         disabled={busy}
                         onClick={() => {
                           attachedId.current = null;
+                          setEnglishWords([]);
                           setPdfReload((v) => v + 1);
                         }}
                       >
@@ -966,6 +972,9 @@ export default function StudyApp({
                 key={`${note.id}:${note.editorPage}:${importRevision}`}
                 initial={note.drafts[note.editorPage] || ""}
                 fontSize={note.fontSize}
+                englishWords={englishWords}
+                autoEnglish={note.autoEnglish ?? false}
+                onAutoEnglish={(value) => update({ autoEnglish: value })}
                 onComposition={(active) => {
                   composing.current = active;
                 }}

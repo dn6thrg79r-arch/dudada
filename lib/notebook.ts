@@ -14,6 +14,7 @@ export type Notebook = {
   drafts: Record<string, string>;
   updated: string;
   legacyText?: string;
+  autoEnglish?: boolean;
 };
 export function createNotebook(
   name: string,

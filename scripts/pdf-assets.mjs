@@ -1,6 +1,7 @@
 import { cp, mkdir } from "node:fs/promises";
 await mkdir("public/pdfjs", { recursive: true });
 for (const name of [
+  "LICENSE",
   "build/pdf.worker.min.mjs",
   "cmaps",
   "standard_fonts",
