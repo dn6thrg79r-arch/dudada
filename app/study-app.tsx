@@ -49,6 +49,10 @@ export default function StudyApp({
 }) {
   const [importRevision, setImportRevision] = useState(0);
   const [pdfReload, setPdfReload] = useState(0);
+  const [pdfRestore, setPdfRestore] = useState<{
+    id: string;
+    status: "loading" | "ready" | "missing" | "error";
+  } | null>(null);
   const [englishWords, setEnglishWords] = useState<string[]>([]);
   const [note, setNote] = useState<Notebook | null>(null),
     [shelf, setShelf] = useState<Notebook[]>([]),
@@ -159,13 +163,32 @@ export default function StudyApp({
       return;
     let cancelled = false;
     let savedFile: File | null = null;
-    repository
-      .loadPdf(target)
-      .then(async (file) => {
-        if (!file || cancelled) return;
+    let restoreTask: PDFDocumentLoadingTask | null = null;
+    const restore = async () => {
+      await Promise.resolve();
+      if (cancelled) return;
+      setPdfRestore({ id: target.id, status: "loading" });
+      try {
+        const file = await repository.loadPdf!(target);
+        if (cancelled) return;
+        if (!file) {
+          setPdfRestore({ id: target.id, status: "missing" });
+          return;
+        }
         savedFile = file;
-        const opened = await openPdf(file, "", () => {});
-        if (cancelled || current.current?.id !== target.id) {
+        const opened = await openPdf(
+          file,
+          "",
+          () => {},
+          (t) => {
+            restoreTask = t;
+          },
+        );
+        if (
+          cancelled ||
+          current.current?.id !== target.id ||
+          attachedId.current === target.id
+        ) {
           await opened.task.destroy();
           return;
         }
@@ -174,9 +197,9 @@ export default function StudyApp({
         attachedId.current = target.id;
         setPdf(opened.document);
         setAttached(target.id);
+        setPdfRestore({ id: target.id, status: "ready" });
         void old?.destroy();
-      })
-      .catch((e) => {
+      } catch (e) {
         if (!cancelled) {
           if (
             savedFile &&
@@ -185,13 +208,18 @@ export default function StudyApp({
             setRetryFile(savedFile);
             reconnect.current = true;
           }
+          setPdfRestore({ id: target.id, status: "error" });
           setError(
-            `저장된 PDF를 열지 못했습니다. 암호가 있는 PDF는 원본을 다시 선택하고 PDF 암호를 입력해 주세요. ${e instanceof Error ? e.message : ""}`,
+            `저장된 PDF를 열지 못했습니다. 연결 상태를 확인하고 다시 시도해 주세요. ${pdfError(e)}`,
           );
         }
-      });
+      }
+    };
+    void restore();
     return () => {
       cancelled = true;
+      if (restoreTask && restoreTask !== task.current)
+        void restoreTask.destroy();
     };
   }, [noteId, repository, pdfReload]);
   function update(change: Partial<Notebook>) {
@@ -359,6 +387,11 @@ export default function StudyApp({
       });
   }
   const connected = !!note && attached === note.id && !!pdf;
+  const restoringPdf =
+    !!repository.loadPdf &&
+    !!note &&
+    !connected &&
+    (pdfRestore?.id !== note.id || pdfRestore.status === "loading");
   return (
     <div ref={shell} className={`study-shell${focusMode ? " is-focused" : ""}`}>
       {focusMode && (
@@ -650,6 +683,7 @@ export default function StudyApp({
                   setEnglishWords([]);
                   setPdf(null);
                   setAttached(null);
+                  setPdfRestore({ id: note.id, status: "missing" });
                 } catch (e) {
                   setError(
                     e instanceof Error ? e.message : "삭제에 실패했습니다.",
@@ -881,6 +915,12 @@ export default function StudyApp({
                     zoom={note.zoom}
                     onEnglishWords={setEnglishWords}
                   />
+                ) : restoringPdf ? (
+                  <div className="reconnect" role="status" aria-live="polite">
+                    <BookOpen size={40} />
+                    <h2>보고 있던 PDF를 불러오고 있어요.</h2>
+                    <p>{note.pdfPage}페이지부터 이어서 열어요.</p>
+                  </div>
                 ) : (
                   <div className="reconnect">
                     <BookOpen size={40} />
@@ -895,6 +935,8 @@ export default function StudyApp({
                         disabled={busy}
                         onClick={() => {
                           attachedId.current = null;
+                          setError("");
+                          setPdfRestore({ id: note.id, status: "loading" });
                           setEnglishWords([]);
                           setPdfReload((v) => v + 1);
                         }}
@@ -1040,6 +1082,11 @@ export default function StudyApp({
             </section>
           </main>
         </>
+      ) : !ready ? (
+        <main className="welcome" role="status">
+          <BookOpen size={40} />
+          <p>보고 있던 자료를 불러오는 중…</p>
+        </main>
       ) : (
         <main className="welcome">
           <span className="welcome-icon">
@@ -1078,7 +1125,6 @@ export default function StudyApp({
               ? "PDF와 필사는 로그인한 계정의 비공개 공간에 저장됩니다."
               : "파일과 필사는 이 브라우저에서만 처리됩니다."}
           </p>
-          {!ready && <p role="status">저장된 필사를 불러오는 중…</p>}
         </main>
       )}
     </div>

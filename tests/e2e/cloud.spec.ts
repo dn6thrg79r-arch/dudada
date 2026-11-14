@@ -32,6 +32,9 @@ function backend(
   const requests: string[] = [];
   let failUpload = false;
   let failWrite = false;
+  let failDownload = false;
+  let downloadGate: Promise<void> | null = null;
+  let releaseDownload: (() => void) | undefined;
   function identity(token: string) {
     try {
       return JSON.parse(
@@ -241,6 +244,8 @@ function backend(
           objects.set(key, bytes);
           return json({ Key: "study-pdfs/" + key });
         }
+        if (downloadGate) await downloadGate;
+        if (failDownload) return json({ message: "download unavailable" }, 503);
         const data = objects.get(key);
         if (!data) return json({ message: "missing" }, 404);
         return route.fulfill({
@@ -259,6 +264,18 @@ function backend(
     objects,
     writesFail: (value: boolean) => {
       failWrite = value;
+    },
+    failDownloads: (value: boolean) => {
+      failDownload = value;
+    },
+    holdDownloads: () => {
+      downloadGate = new Promise<void>((resolve) => {
+        releaseDownload = resolve;
+      });
+    },
+    resumeDownloads: () => {
+      releaseDownload?.();
+      downloadGate = null;
     },
     failUploads: () => {
       failUpload = true;
@@ -672,4 +689,92 @@ test("다른 계정 아이디는 가져오지 못하고 모바일 설정에서�
   );
   await first.close();
   await second.close();
+});
+
+test("접속 즉시 마지막 PDF를 불러오고 다운로드 중에는 재연결 화면 없이 필사를 유지한다", async ({
+  browser,
+  baseURL,
+}) => {
+  const service = backend();
+  const context = await browser.newContext({ baseURL });
+  await service.install(context);
+  const page = await context.newPage();
+  try {
+    await login(page, "자동복원계정", "1234");
+    await upload(page);
+    await page.getByLabel("현재 PDF 페이지").selectOption("3");
+    const editor = page.getByRole("textbox", { name: "필사 편집기" });
+    await editor.fill("3페이지에 남겨 둔 필사");
+    await expect(page.locator(".save-state")).toHaveAttribute(
+      "data-save-state",
+      "saved",
+    );
+    service.holdDownloads();
+    await page.reload();
+    await expect(
+      page.getByRole("heading", { name: "보고 있던 PDF를 불러오고 있어요." }),
+    ).toBeVisible();
+    await expect(
+      page.getByText("필사는 그대로 남아 있어요.", { exact: true }),
+    ).toHaveCount(0);
+    await expect(
+      page.getByRole("button", {
+        name: "저장된 PDF 다시 불러오기",
+        exact: true,
+      }),
+    ).toHaveCount(0);
+    await expect(
+      page.getByRole("heading", { name: "읽고, 천천히 옮겨 적어요." }),
+    ).toHaveCount(0);
+    await expect(editor).toHaveValue("3페이지에 남겨 둔 필사");
+    await editor.evaluate((e) => e.setAttribute("data-kept", "restoring"));
+    await editor.fill("PDF가 열리는 동안에도 자유롭게 필사");
+    await expect(page.locator(".save-state")).toHaveAttribute(
+      "data-save-state",
+      "saved",
+    );
+    service.resumeDownloads();
+    await expect(
+      page.getByRole("img", { name: "PDF 원본 3페이지", exact: true }),
+    ).toBeVisible();
+    await expect(editor).toHaveValue("PDF가 열리는 동안에도 자유롭게 필사");
+    await expect(editor).toHaveAttribute("data-kept", "restoring");
+    await expect(editor).toBeFocused();
+    // Only a real load failure exposes the retry action; retry itself runs immediately.
+    service.failDownloads(true);
+    await page.reload();
+    const retry = page.getByRole("button", {
+      name: "저장된 PDF 다시 불러오기",
+      exact: true,
+    });
+    await expect(retry).toBeVisible();
+    await expect(page.locator(".notice[role=alert]")).toContainText(
+      "저장된 PDF를 열지 못했습니다",
+    );
+    await expect(editor).toHaveValue("PDF가 열리는 동안에도 자유롭게 필사");
+    service.failDownloads(false);
+    service.holdDownloads();
+    await retry.click();
+    await expect(retry).toHaveCount(0);
+    await expect(
+      page.getByRole("heading", { name: "보고 있던 PDF를 불러오고 있어요." }),
+    ).toBeVisible();
+    service.resumeDownloads();
+    await expect(
+      page.getByRole("img", { name: "PDF 원본 3페이지", exact: true }),
+    ).toBeVisible();
+    // A genuinely absent original still offers reconnection instead of spinning forever.
+    service.documents.clear();
+    await page.reload();
+    await expect(
+      page.getByRole("button", { name: "원본 PDF 다시 연결", exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "보고 있던 PDF를 불러오고 있어요." }),
+    ).toHaveCount(0);
+    await expect(editor).toHaveValue("PDF가 열리는 동안에도 자유롭게 필사");
+  } finally {
+    service.resumeDownloads();
+    await context.close();
+  }
 });
