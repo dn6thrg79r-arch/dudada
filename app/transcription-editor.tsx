@@ -12,8 +12,7 @@ export default function TranscriptionEditor({
   onInput,
   onComposition,
   englishWords = [],
-  autoEnglish = false,
-  onAutoEnglish,
+  autoEnglish = true,
 }: {
   initial: string;
   fontSize: number;
@@ -21,7 +20,6 @@ export default function TranscriptionEditor({
   onComposition: (active: boolean) => void;
   englishWords?: string[];
   autoEnglish?: boolean;
-  onAutoEnglish?: (value: boolean) => void;
 }) {
   const area = useRef<HTMLTextAreaElement>(null),
     composing = useRef(false),
@@ -131,15 +129,6 @@ export default function TranscriptionEditor({
         >
           한글 → 영문
         </button>
-        <label title="현재 PDF 원문에 있는 영단어와 일치하는 자모·숫자 혼합 낱말만 공백·문장부호 뒤에 변환합니다. 일반 한글과 애매한 단어는 그대로 둡니다.">
-          <input
-            type="checkbox"
-            aria-label="영문 자동 변환"
-            checked={autoEnglish}
-            onChange={(e) => onAutoEnglish?.(e.target.checked)}
-          />
-          자동 변환
-        </label>
       </div>
     </>
   );

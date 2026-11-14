@@ -41,6 +41,7 @@ export function createNotebook(
     split: 55,
     fontSize: 19,
     drafts: {},
+    autoEnglish: true,
     updated: new Date().toISOString(),
   };
 }

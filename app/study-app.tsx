@@ -740,6 +740,19 @@ export default function StudyApp({
             />{" "}
             PDF 페이지에 맞춰 필사 전환
           </label>
+          <label
+            className="check-label"
+            title="현재 PDF 원문 영단어와 맞는 한/영 자판 오타만 조합을 마친 뒤 바꿉니다."
+          >
+            <input
+              type="checkbox"
+              aria-label="영문 자동 변환"
+              checked={note?.autoEnglish ?? true}
+              disabled={!note}
+              onChange={(e) => update({ autoEnglish: e.target.checked })}
+            />
+            한글 → 영문 자동 변환
+          </label>
           <button onClick={theme}>
             {dark ? <Sun size={16} /> : <Moon size={16} />}{" "}
             {dark ? "밝은 화면" : "다크 모드"}
@@ -1255,8 +1268,7 @@ export default function StudyApp({
                 initial={note.drafts[note.editorPage] || ""}
                 fontSize={note.fontSize}
                 englishWords={englishWords}
-                autoEnglish={note.autoEnglish ?? false}
-                onAutoEnglish={(value) => update({ autoEnglish: value })}
+                autoEnglish={note.autoEnglish ?? true}
                 onComposition={(active) => {
                   composing.current = active;
                 }}
