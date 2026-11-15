@@ -182,7 +182,9 @@ export function createCloudRepository(
         parts.push(data);
       }
       const file = new File(parts, info.name, {
-        type: "application/pdf",
+        type: /\.pptx$/i.test(info.name)
+          ? "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+          : "application/pdf",
         lastModified: info.modified,
       });
       if (file.size !== info.size)

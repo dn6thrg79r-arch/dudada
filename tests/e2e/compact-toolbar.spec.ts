@@ -4,7 +4,7 @@ test("설명줄 없이 페이지 옆 아이콘 한 줄을 유지하고 휴대폰
   page,
 }, info) => {
   await page.goto("./local/");
-  await page.getByLabel("PDF 파일 선택").setInputFiles({
+  await page.getByLabel("학습 자료 파일 선택").setInputFiles({
     name: "긴_병원소식지_파일이름_8페이지.pdf",
     mimeType: "application/pdf",
     buffer: await pdfFixture(),

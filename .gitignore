@@ -10,3 +10,7 @@ test-results/
 *.pdf
 *.txt
 !robots.txt
+
+*.pptx
+*.ppt
+public/pptx/

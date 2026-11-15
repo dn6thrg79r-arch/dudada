@@ -4,13 +4,11 @@ test("THE GREAT FUTURE·AI를 한글 자판으로 입력해도 원문에 맞추�
   page,
 }) => {
   await page.goto("./local/");
-  await page
-    .getByLabel("PDF 파일 선택")
-    .setInputFiles({
-      name: "영문표현.pdf",
-      mimeType: "application/pdf",
-      buffer: await englishPdfFixture(),
-    });
+  await page.getByLabel("학습 자료 파일 선택").setInputFiles({
+    name: "영문표현.pdf",
+    mimeType: "application/pdf",
+    buffer: await englishPdfFixture(),
+  });
   await expect(page.locator(".pdf-text-layer")).toContainText(
     "THE GREAT FUTURE AI",
   );
@@ -50,13 +48,11 @@ test("PDF를 클릭한 뒤 방향키로만 페이지를 넘기고 필사 커서�
   page,
 }) => {
   await page.goto("./local/");
-  await page
-    .getByLabel("PDF 파일 선택")
-    .setInputFiles({
-      name: "방향키.pdf",
-      mimeType: "application/pdf",
-      buffer: await pdfFixture(),
-    });
+  await page.getByLabel("학습 자료 파일 선택").setInputFiles({
+    name: "방향키.pdf",
+    mimeType: "application/pdf",
+    buffer: await pdfFixture(),
+  });
   await expect(
     page.getByRole("img", { name: "PDF 원본 1페이지", exact: true }),
   ).toBeVisible();

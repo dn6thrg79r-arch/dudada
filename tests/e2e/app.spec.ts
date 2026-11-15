@@ -4,7 +4,7 @@ import { pdfFixture } from "./pdf-fixture";
 import { encryptedPdf } from "./encrypted-fixture";
 async function openPdf(page: Page) {
   await page.goto("./local/");
-  await page.getByLabel("PDF 파일 선택").setInputFiles({
+  await page.getByLabel("학습 자료 파일 선택").setInputFiles({
     name: "병원소식_8페이지.pdf",
     mimeType: "application/pdf",
     buffer: await pdfFixture(),
@@ -62,7 +62,7 @@ test("PDF 원본 + 빈 편집기 → 자유 입력 → 확대·스크롤·페이
   ).toBeVisible();
   await expect(page.getByLabel("PDF 확대 비율")).toHaveValue("200");
   await page.getByRole("button", { name: "원본 PDF 다시 연결" }).click();
-  await page.getByLabel("PDF 파일 선택").setInputFiles({
+  await page.getByLabel("학습 자료 파일 선택").setInputFiles({
     name: "병원소식_8페이지.pdf",
     mimeType: "application/pdf",
     buffer: await pdfFixture(),
@@ -180,7 +180,7 @@ test("스캔·암호·손상 PDF, 100MB 이상의 선택 페이지 렌더링", a
 }, info) => {
   test.setTimeout(120000);
   await page.goto("./local/");
-  await page.getByLabel("PDF 파일 선택").setInputFiles({
+  await page.getByLabel("학습 자료 파일 선택").setInputFiles({
     name: "스캔.pdf",
     mimeType: "application/pdf",
     buffer: await pdfFixture(true),
@@ -189,7 +189,7 @@ test("스캔·암호·손상 PDF, 100MB 이상의 선택 페이지 렌더링", a
     page.getByRole("img", { name: "PDF 원본 1페이지", exact: true }),
   ).toBeVisible();
   await editor(page).fill("이미지 PDF도 자유롭게 필사");
-  await page.getByLabel("PDF 파일 선택").setInputFiles({
+  await page.getByLabel("학습 자료 파일 선택").setInputFiles({
     name: "암호.pdf",
     mimeType: "application/pdf",
     buffer: Buffer.from(encryptedPdf, "base64"),
@@ -202,8 +202,8 @@ test("스캔·암호·손상 PDF, 100MB 이상의 선택 페이지 렌더링", a
   await page.getByLabel("PDF 암호", { exact: true }).fill("study123");
   await page.getByRole("button", { name: "다시 열기", exact: true }).click();
   await expect(page.locator(".document-name")).toContainText("암호.pdf");
-  await expect(page.getByLabel("PDF 파일 선택")).toBeEnabled();
-  await page.getByLabel("PDF 파일 선택").setInputFiles({
+  await expect(page.getByLabel("학습 자료 파일 선택")).toBeEnabled();
+  await page.getByLabel("학습 자료 파일 선택").setInputFiles({
     name: "손상.pdf",
     mimeType: "application/pdf",
     buffer: Buffer.from("broken"),
@@ -214,7 +214,7 @@ test("스캔·암호·손상 PDF, 100MB 이상의 선택 페이지 렌더링", a
   await page.getByRole("button", { name: "취소", exact: true }).click();
   const path = info.outputPath("큰신문.pdf");
   await writeFile(path, await pdfFixture(false, true));
-  await page.getByLabel("PDF 파일 선택").setInputFiles(path);
+  await page.getByLabel("학습 자료 파일 선택").setInputFiles(path);
   await expect(
     page.getByRole("img", { name: "PDF 원본 1페이지", exact: true }),
   ).toBeVisible();
@@ -358,7 +358,7 @@ test("한글을 연속 입력해도 상단 버튼과 도구줄이 반짝이거�
     await area.fill(value);
     await area.dispatchEvent("compositionupdate", { data: value.at(-1) });
     await expect(
-      page.getByRole("button", { name: "PDF 불러오기", exact: true }),
+      page.getByRole("button", { name: "자료 불러오기", exact: true }),
     ).toBeEnabled();
     await expect(
       page.getByRole("button", { name: "다음 페이지", exact: true }),
@@ -535,7 +535,7 @@ test("한/영 오타 변환은 원문 영단어만 조합 완료 후 바꾸며 �
 }) => {
   const { englishPdfFixture } = await import("./pdf-fixture");
   await page.goto("./local/");
-  await page.getByLabel("PDF 파일 선택").setInputFiles({
+  await page.getByLabel("학습 자료 파일 선택").setInputFiles({
     name: "의학영문.pdf",
     mimeType: "application/pdf",
     buffer: await englishPdfFixture(),

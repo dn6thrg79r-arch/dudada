@@ -4,5 +4,10 @@ import ts from "eslint-config-next/typescript";
 export default defineConfig([
   ...next,
   ...ts,
-  globalIgnores(["public/pdfjs/**", "test-results/**", "playwright-report/**"]),
+  globalIgnores([
+    "public/pdfjs/**",
+    "public/pptx/**",
+    "test-results/**",
+    "playwright-report/**",
+  ]),
 ]);

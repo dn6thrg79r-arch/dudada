@@ -4,13 +4,11 @@ test("필사 가리기는 PDF를 넓히고 복귀 시 글·커서·스크롤·�
   page,
 }, info) => {
   await page.goto("./local/");
-  await page
-    .getByLabel("PDF 파일 선택")
-    .setInputFiles({
-      name: "집중읽기.pdf",
-      mimeType: "application/pdf",
-      buffer: await pdfFixture(),
-    });
+  await page.getByLabel("학습 자료 파일 선택").setInputFiles({
+    name: "집중읽기.pdf",
+    mimeType: "application/pdf",
+    buffer: await pdfFixture(),
+  });
   await expect(
     page.getByRole("img", { name: "PDF 원본 1페이지", exact: true }),
   ).toBeVisible();

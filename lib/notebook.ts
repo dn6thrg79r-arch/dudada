@@ -3,6 +3,7 @@ export type Notebook = {
   id: string;
   title: string;
   fileName: string;
+  kind?: "pdf" | "pptx";
   fileSize: number | null;
   fingerprint: string | null;
   pageCount: number;
@@ -30,7 +31,7 @@ export function createNotebook(
 ): Notebook {
   return {
     id: crypto.randomUUID(),
-    title: name.replace(/\.pdf$/i, ""),
+    title: name.replace(/\.(pdf|pptx)$/i, ""),
     fileName: name,
     fileSize: size,
     fingerprint,

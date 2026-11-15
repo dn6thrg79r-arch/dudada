@@ -1,4 +1,5 @@
 import { test, expect, type BrowserContext, type Page } from "@playwright/test";
+import { pptxFixture } from "./pptx-fixture";
 import { pdfFixture } from "./pdf-fixture";
 import { createHash } from "node:crypto";
 import { writeFile } from "node:fs/promises";
@@ -289,7 +290,7 @@ async function login(page: Page, name: string, password = "study-password") {
   await page.getByRole("button", { name: "들어가기", exact: true }).click();
 }
 async function upload(page: Page) {
-  await page.getByLabel("PDF 파일 선택").setInputFiles({
+  await page.getByLabel("학습 자료 파일 선택").setInputFiles({
     name: "소식지.pdf",
     mimeType: "application/pdf",
     buffer: await pdfFixture(),
@@ -297,7 +298,7 @@ async function upload(page: Page) {
   await expect(
     page.getByRole("img", { name: "PDF 원본 1페이지", exact: true }),
   ).toBeVisible();
-  await expect(page.getByLabel("PDF 파일 선택")).toBeEnabled();
+  await expect(page.getByLabel("학습 자료 파일 선택")).toBeEnabled();
 }
 test("새 계정 → PDF·필사 저장 → 독립 브라우저 로그인·PDF 복원 → 다른 계정 분리", async ({
   browser,
@@ -421,13 +422,13 @@ test("101MB PDF를 여러 조각으로 저장하고 다른 브라우저에서 �
   const first = await firstContext.newPage(),
     second = await secondContext.newPage();
   await login(first, "큰파일계정");
-  await expect(first.getByLabel("PDF 파일 선택")).toBeEnabled({
+  await expect(first.getByLabel("학습 자료 파일 선택")).toBeEnabled({
     timeout: 60000,
   });
   const path = info.outputPath("큰소식지.pdf");
   await writeFile(path, await pdfFixture(false, true));
-  await first.getByLabel("PDF 파일 선택").setInputFiles(path);
-  await expect(first.getByLabel("PDF 파일 선택")).toBeEnabled({
+  await first.getByLabel("학습 자료 파일 선택").setInputFiles(path);
+  await expect(first.getByLabel("학습 자료 파일 선택")).toBeEnabled({
     timeout: 60000,
   });
   await expect.poll(() => service.objects.size).toBe(11);
@@ -892,4 +893,56 @@ test("형광펜·책갈피·이전 버전·PDF 가리기를 같은 계정의 다
     await first.close();
     await second.close();
   }
+});
+
+test("PPTX 원본과 슬라이드별 필사를 기존 계정 저장소로 다른 브라우저에서 복원한다", async ({
+  browser,
+  baseURL,
+}) => {
+  const service = backend();
+  const a = await browser.newContext({ baseURL }),
+    b = await browser.newContext({ baseURL });
+  await service.install(a);
+  await service.install(b);
+  const first = await a.newPage(),
+    second = await b.newPage();
+  await login(first, "발표자료계정");
+  const buffer = await pptxFixture();
+  await first
+    .getByLabel("학습 자료 파일 선택")
+    .setInputFiles({
+      name: "연구발표.pptx",
+      mimeType:
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      buffer,
+    });
+  await expect(
+    first
+      .frameLocator("iframe")
+      .getByText("두다다 공부방 · 첫 슬라이드", { exact: true }),
+  ).toBeVisible();
+  await first.getByLabel("현재 슬라이드").selectOption("2");
+  await first
+    .getByRole("textbox", { name: "필사 편집기" })
+    .fill("두 번째 슬라이드의 연구 결과");
+  await expect(first.locator(".save-state")).toHaveAttribute(
+    "data-save-state",
+    "saved",
+  );
+  await expect.poll(() => service.objects.size).toBeGreaterThan(0);
+  expect(Buffer.concat([...service.objects.values()]).equals(buffer)).toBe(
+    true,
+  );
+  await login(second, "발표자료계정");
+  await expect(second.getByLabel("현재 슬라이드")).toHaveValue("2");
+  await expect(
+    second
+      .frameLocator("iframe")
+      .getByText("AI와 THE GREAT FUTURE", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    second.getByRole("textbox", { name: "필사 편집기" }),
+  ).toHaveValue("두 번째 슬라이드의 연구 결과");
+  await a.close();
+  await b.close();
 });

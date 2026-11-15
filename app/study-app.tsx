@@ -37,8 +37,15 @@ import {
 import { listNotebooks, saveNotebook } from "@/lib/storage";
 import type { StudyRepository } from "@/lib/repository";
 const localRepository: StudyRepository = { listNotebooks, saveNotebook };
+import { pdfEnglishWords, pdfKoreanWords } from "@/lib/english-input";
 import { openPdf, pdfError } from "@/lib/pdf";
 import PdfPreview from "./pdf-preview";
+import PresentationPreview from "./presentation-preview";
+import {
+  MAX_PRESENTATION_BYTES,
+  openPresentation,
+  type PresentationDocument,
+} from "@/lib/presentation";
 import Editor from "./transcription-editor";
 import DraftHistory from "./draft-history";
 import ReadingMarks from "./reading-marks";
@@ -61,6 +68,9 @@ export default function StudyApp({
   onManageAccount?: () => void;
 }) {
   const [importRevision, setImportRevision] = useState(0);
+  const [presentation, setPresentation] = useState<PresentationDocument | null>(
+    null,
+  );
   const [showHistory, setShowHistory] = useState(false);
   const [showMarks, setShowMarks] = useState(false);
   const [pdfReload, setPdfReload] = useState(0);
@@ -200,29 +210,47 @@ export default function StudyApp({
           return;
         }
         savedFile = file;
-        const opened = await openPdf(
-          file,
-          "",
-          () => {},
-          (t) => {
-            restoreTask = t;
-          },
-        );
-        if (
-          cancelled ||
-          current.current?.id !== target.id ||
-          attachedId.current === target.id
-        ) {
-          await opened.task.destroy();
-          return;
+        if (/\.pptx$/i.test(file.name)) {
+          const slides = await openPresentation(file, () => {});
+          if (
+            cancelled ||
+            current.current?.id !== target.id ||
+            attachedId.current === target.id
+          )
+            return;
+          const old = task.current;
+          task.current = null;
+          attachedId.current = target.id;
+          setPdf(null);
+          setPresentation(slides);
+          setAttached(target.id);
+          void old?.destroy();
+        } else {
+          const opened = await openPdf(
+            file,
+            "",
+            () => {},
+            (t) => {
+              restoreTask = t;
+            },
+          );
+          if (
+            cancelled ||
+            current.current?.id !== target.id ||
+            attachedId.current === target.id
+          ) {
+            await opened.task.destroy();
+            return;
+          }
+          const old = task.current;
+          task.current = opened.task;
+          attachedId.current = target.id;
+          setPresentation(null);
+          setPdf(opened.document);
+          setAttached(target.id);
+          void old?.destroy();
         }
-        const old = task.current;
-        task.current = opened.task;
-        attachedId.current = target.id;
-        setPdf(opened.document);
-        setAttached(target.id);
         setPdfRestore({ id: target.id, status: "ready" });
-        void old?.destroy();
       } catch (e) {
         if (!cancelled) {
           if (
@@ -234,7 +262,7 @@ export default function StudyApp({
           }
           setPdfRestore({ id: target.id, status: "error" });
           setError(
-            `저장된 PDF를 열지 못했습니다. 연결 상태를 확인하고 다시 시도해 주세요. ${pdfError(e)}`,
+            `저장된 ${target.kind === "pptx" ? "PPTX" : "PDF"}를 열지 못했습니다. 연결 상태를 확인하고 다시 시도해 주세요. ${target.kind === "pptx" && e instanceof Error ? e.message : pdfError(e)}`,
           );
         }
       }
@@ -246,6 +274,14 @@ export default function StudyApp({
         void restoreTask.destroy();
     };
   }, [noteId, repository, pdfReload]);
+  useEffect(() => {
+    if (!presentation || attached !== noteId) return;
+    const text = presentation.texts[(note?.pdfPage || 1) - 1] || "";
+    Promise.resolve().then(() => {
+      setEnglishWords(pdfEnglishWords(text));
+      setKoreanWords(pdfKoreanWords(text));
+    });
+  }, [presentation, attached, noteId, note?.pdfPage]);
   function update(change: Partial<Notebook>) {
     if (
       composing.current &&
@@ -333,10 +369,22 @@ export default function StudyApp({
     reconnect.current = relink;
     picker.current?.click();
   }
+  function selectFile(file: File) {
+    void load(file);
+  }
   async function load(file: File) {
     if (opening.current) return;
-    if (!/\.pdf$/i.test(file.name)) {
-      setError("PDF 파일을 선택해 주세요.");
+    const isPptx = /\.pptx$/i.test(file.name);
+    if (!/\.(pdf|pptx)$/i.test(file.name)) {
+      setError(
+        /\.ppt$/i.test(file.name)
+          ? "예전 PPT 파일은 PPTX 또는 PDF로 저장한 뒤 불러와 주세요."
+          : "PDF 또는 PPTX 파일을 선택해 주세요.",
+      );
+      return;
+    }
+    if (isPptx && (!file.size || file.size > MAX_PRESENTATION_BYTES)) {
+      setError("PPTX는 50MB 이하로 나눠 불러와 주세요.");
       return;
     }
     if (file.size > 512 * 1024 * 1024) {
@@ -349,49 +397,55 @@ export default function StudyApp({
     setBusy(true);
     setProgress(0);
     setError("");
-    setRetryFile(file);
+    setRetryFile(isPptx ? null : file);
     let opened: Awaited<ReturnType<typeof openPdf>> | null = null;
     try {
-      opened = await openPdf(file, password, setProgress, (t) => {
-        loading.current = t;
-      });
-      const doc = opened.document;
-      const fingerprint = doc.fingerprints[0] || "";
+      const slides = isPptx ? await openPresentation(file, setProgress) : null;
+      if (!isPptx)
+        opened = await openPdf(file, password, setProgress, (t) => {
+          loading.current = t;
+        });
+      const doc = opened?.document;
+      const count = slides?.pageCount || doc!.numPages;
+      const fingerprint = slides?.fingerprint || doc!.fingerprints[0] || "";
       const existing = current.current;
       if (
         reconnect.current &&
         existing &&
-        !matchesPdf(existing, file.name, file.size, fingerprint, doc.numPages)
+        !matchesPdf(existing, file.name, file.size, fingerprint, count)
       ) {
-        await opened.task.destroy();
+        await opened?.task.destroy();
         opened = null;
         throw new Error(
-          "연결할 PDF가 원래 자료와 다릅니다. 원본 파일을 선택하거나 “PDF 불러오기”로 새 자료를 만드세요.",
+          "연결할 자료가 원래 자료와 다릅니다. 원본 파일을 선택하거나 새 자료로 불러와 주세요.",
         );
       }
       const match = reconnect.current
         ? existing
         : existing &&
-            matchesPdf(
-              existing,
-              file.name,
-              file.size,
-              fingerprint,
-              doc.numPages,
-            )
+            matchesPdf(existing, file.name, file.size, fingerprint, count)
           ? existing
           : shelf.find((n) =>
-              matchesPdf(n, file.name, file.size, fingerprint, doc.numPages),
+              matchesPdf(n, file.name, file.size, fingerprint, count),
             );
       const next = match
-        ? { ...match, fingerprint, fileSize: file.size }
-        : createNotebook(file.name, doc.numPages, fingerprint, file.size);
+        ? {
+            ...match,
+            fingerprint,
+            fileSize: file.size,
+            kind: isPptx ? ("pptx" as const) : ("pdf" as const),
+          }
+        : {
+            ...createNotebook(file.name, count, fingerprint, file.size),
+            kind: isPptx ? ("pptx" as const) : ("pdf" as const),
+          };
       if (!next) throw new Error("연결할 필사 자료를 선택해 주세요.");
       if (repository.savePdf && !match) await repository.saveNotebook(next);
       const old = task.current;
-      task.current = opened.task;
+      task.current = opened?.task || null;
       attachedId.current = next.id;
-      setPdf(doc);
+      setPdf(doc || null);
+      setPresentation(slides);
       setAttached(next.id);
       activate(next);
       void old?.destroy();
@@ -409,7 +463,9 @@ export default function StudyApp({
       setError(
         e instanceof Error && e.message.startsWith("연결할")
           ? e.message
-          : pdfError(e),
+          : isPptx && e instanceof Error
+            ? e.message
+            : pdfError(e),
       );
     } finally {
       loading.current = null;
@@ -520,7 +576,8 @@ export default function StudyApp({
     });
     return () => cancelAnimationFrame(frame);
   }, [note?.pdfOnly, noteId, note?.editorPage]);
-  const connected = !!note && attached === note.id && !!pdf;
+  const sourceLabel = note?.kind === "pptx" ? "PPTX" : "PDF";
+  const connected = !!note && attached === note.id && !!(pdf || presentation);
   const restoringPdf =
     !!repository.loadPdf &&
     !!note &&
@@ -587,12 +644,12 @@ export default function StudyApp({
         className="sr-only"
         ref={picker}
         type="file"
-        accept="application/pdf,.pdf"
-        aria-label="PDF 파일 선택"
+        accept="application/pdf,.pdf,application/vnd.openxmlformats-officedocument.presentationml.presentation,.pptx"
+        aria-label="학습 자료 파일 선택"
         disabled={!ready || busy}
         onChange={(e) => {
           const file = e.target.files?.[0];
-          if (file) void load(file);
+          if (file) selectFile(file);
           e.target.value = "";
         }}
       />
@@ -628,7 +685,7 @@ export default function StudyApp({
             onClick={() => choose()}
           >
             <Upload size={16} />
-            <span>PDF 불러오기</span>
+            <span>자료 불러오기</span>
           </button>
           <button
             aria-label="내 필사 자료"
@@ -705,9 +762,13 @@ export default function StudyApp({
       )}
       {busy && (
         <div className="loading-bar" role="status">
-          <span>PDF 불러오기·저장 중 · {progress}%</span>
+          <span>자료 불러오기·저장 중 · {progress}%</span>
           <progress max="100" value={progress} />
-          <button onClick={() => void loading.current?.destroy()}>취소</button>
+          {retryFile && (
+            <button onClick={() => void loading.current?.destroy()}>
+              취소
+            </button>
+          )}
         </div>
       )}
       {retryFile && !busy && (
@@ -937,6 +998,7 @@ export default function StudyApp({
                   setEnglishWords([]);
                   setKoreanWords([]);
                   setPdf(null);
+                  setPresentation(null);
                   setAttached(null);
                   setPdfRestore({ id: note.id, status: "missing" });
                 } catch (e) {
@@ -1039,7 +1101,9 @@ export default function StudyApp({
               <label className="page-number">
                 <span className="sr-only">현재 PDF 페이지</span>
                 <select
-                  aria-label="현재 PDF 페이지"
+                  aria-label={
+                    presentation ? "현재 슬라이드" : "현재 PDF 페이지"
+                  }
                   value={note.pdfPage}
                   onChange={(e) => navigate(+e.target.value)}
                 >
@@ -1141,7 +1205,9 @@ export default function StudyApp({
                 <Minus size={16} />
               </button>
               <select
-                aria-label="PDF 확대 비율"
+                aria-label={
+                  presentation ? "슬라이드 확대 비율" : "PDF 확대 비율"
+                }
                 value={note.zoom}
                 onChange={(e) =>
                   update({
@@ -1245,7 +1311,7 @@ export default function StudyApp({
           >
             <section
               className="pdf-pane"
-              aria-label="PDF 뷰어"
+              aria-label={presentation ? "프레젠테이션 뷰어" : "PDF 뷰어"}
               onKeyDown={(e) => {
                 if (
                   !connected ||
@@ -1321,7 +1387,19 @@ export default function StudyApp({
                     e.preventDefault();
                 }}
               >
-                {connected ? (
+                {connected && presentation ? (
+                  <PresentationPreview
+                    document={presentation}
+                    number={note.pdfPage}
+                    zoom={note.zoom}
+                    highlights={note.highlights}
+                    onHighlight={addHighlight}
+                    onNavigate={(delta) => {
+                      const n = current.current;
+                      if (n && !composing.current) navigate(n.pdfPage + delta);
+                    }}
+                  />
+                ) : connected ? (
                   <PdfPreview
                     document={pdf!}
                     number={note.pdfPage}
@@ -1334,7 +1412,7 @@ export default function StudyApp({
                 ) : restoringPdf ? (
                   <div className="reconnect" role="status" aria-live="polite">
                     <BookOpen size={40} />
-                    <h2>보고 있던 PDF를 불러오고 있어요.</h2>
+                    <h2>보고 있던 {sourceLabel}를 불러오고 있어요.</h2>
                     <p>{note.pdfPage}페이지부터 이어서 열어요.</p>
                   </div>
                 ) : (
@@ -1342,7 +1420,7 @@ export default function StudyApp({
                     <BookOpen size={40} />
                     <h2>필사는 그대로 남아 있어요.</h2>
                     <p>
-                      원본 PDF를 다시 선택하면
+                      원본 {sourceLabel}를 다시 선택하면
                       <br />
                       이어서 읽을 수 있어요.
                     </p>
@@ -1358,7 +1436,7 @@ export default function StudyApp({
                           setPdfReload((v) => v + 1);
                         }}
                       >
-                        저장된 PDF 다시 불러오기
+                        저장된 {sourceLabel} 다시 불러오기
                       </button>
                     )}
                     <button
@@ -1366,12 +1444,12 @@ export default function StudyApp({
                       disabled={busy}
                       onClick={() => choose(true)}
                     >
-                      원본 PDF 다시 연결
+                      원본 {sourceLabel} 다시 연결
                     </button>
                     <small>
                       {repository.savePdf
-                        ? "PDF가 저장되지 않았거나 연결에 실패했습니다. 원본을 선택하면 다시 저장합니다."
-                        : "PDF 원본은 자동 저장하지 않습니다."}
+                        ? `${sourceLabel}가 저장되지 않았거나 연결에 실패했습니다. 원본을 선택하면 다시 저장합니다.`
+                        : `${sourceLabel} 원본은 자동 저장하지 않습니다.`}
                     </small>
                   </div>
                 )}
@@ -1456,7 +1534,7 @@ export default function StudyApp({
               e.preventDefault();
               if (ready && !busy && e.dataTransfer.files[0]) {
                 reconnect.current = false;
-                void load(e.dataTransfer.files[0]);
+                selectFile(e.dataTransfer.files[0]);
               }
             }}
           >
@@ -1466,9 +1544,9 @@ export default function StudyApp({
               disabled={!ready || busy}
               onClick={() => choose()}
             >
-              PDF 불러오기
+              자료 불러오기
             </button>
-            <small>또는 PDF 파일을 이곳에 놓아 주세요.</small>
+            <small>또는 PDF·PPTX 파일을 이곳에 놓아 주세요.</small>
           </div>
           <p className="local-note">
             <ShieldCheck size={15} />{" "}

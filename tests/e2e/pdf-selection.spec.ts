@@ -15,7 +15,7 @@ for (const legacyGuard of [false, true]) {
         page,
       }) => {
         await page.goto("./local/");
-        await page.getByLabel("PDF 파일 선택").setInputFiles({
+        await page.getByLabel("학습 자료 파일 선택").setInputFiles({
           name: "신문형_선택검사.pdf",
           mimeType: "application/pdf",
           buffer: await newspaperPdfFixture(),

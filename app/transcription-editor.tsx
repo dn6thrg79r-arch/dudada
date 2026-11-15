@@ -91,7 +91,7 @@ export default function TranscriptionEditor({
         autoCapitalize="off"
         autoComplete="off"
         placeholder={
-          "PDF를 읽으며 천천히 옮겨 적어 보세요.\n\n기억하고 싶은 문장과 나의 생각을 자유롭게 남겨요."
+          "원문을 읽으며 천천히 옮겨 적어 보세요.\n\n기억하고 싶은 문장과 나의 생각을 자유롭게 남겨요."
         }
         onInput={(e) => {
           if (replacing.current) return;

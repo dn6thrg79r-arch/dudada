@@ -3,7 +3,7 @@ import { pdfFixture } from "./pdf-fixture";
 async function open(page: Page) {
   const buffer = await pdfFixture();
   await page.goto("./local/");
-  await page.getByLabel("PDF 파일 선택").setInputFiles({
+  await page.getByLabel("학습 자료 파일 선택").setInputFiles({
     name: "공부자료.pdf",
     mimeType: "application/pdf",
     buffer,
@@ -89,7 +89,7 @@ test("원문 형광펜과 이름 있는 책갈피를 저장하고 확대·페이
   await expect(marked).toBeAttached();
   await saved(page);
   await page.reload();
-  await page.getByLabel("PDF 파일 선택").setInputFiles({
+  await page.getByLabel("학습 자료 파일 선택").setInputFiles({
     name: "공부자료.pdf",
     mimeType: "application/pdf",
     buffer,
