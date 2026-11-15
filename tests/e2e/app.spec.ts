@@ -542,9 +542,7 @@ test("한/영 오타 변환은 원문 영단어만 조합 완료 후 바꾸며 �
   });
   await expect(page.locator(".pdf-text-layer")).toContainText("VPS26A");
   const area = editor(page);
-  await expect(
-    page.locator(".transcription-tools input[type=checkbox]"),
-  ).toHaveCount(0);
+  await expect(page.locator(".transcription-tools")).toHaveCount(0);
   await expect(page.getByLabel("영문 자동 변환")).toHaveCount(0);
   await page.getByRole("button", { name: "설정", exact: true }).click();
   await expect(page.getByLabel("영문 자동 변환")).toBeChecked();
@@ -591,7 +589,7 @@ test("한/영 오타 변환은 원문 영단어만 조합 완료 후 바꾸며 �
   await expect(area).toHaveValue("ㅗㄱ ");
   await area.fill("해");
   await area.selectText();
-  await page.getByRole("button", { name: "한글 → 영문", exact: true }).click();
+  await area.press("Control+Shift+E");
   await expect(area).toHaveValue("go");
   await area.press("ControlOrMeta+z");
   await expect(area).toHaveValue("해");

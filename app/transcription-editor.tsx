@@ -12,6 +12,7 @@ export default function TranscriptionEditor({
   onInput,
   onComposition,
   englishWords = [],
+  koreanWords = [],
   autoEnglish = true,
 }: {
   initial: string;
@@ -19,6 +20,7 @@ export default function TranscriptionEditor({
   onInput: (text: string) => void;
   onComposition: (active: boolean) => void;
   englishWords?: string[];
+  koreanWords?: string[];
   autoEnglish?: boolean;
 }) {
   const area = useRef<HTMLTextAreaElement>(null),
@@ -28,6 +30,7 @@ export default function TranscriptionEditor({
     () => new Map(englishWords.map((word) => [word.toLowerCase(), word])),
     [englishWords],
   );
+  const korean = useMemo(() => new Set(koreanWords), [koreanWords]);
   function replace(change: Replacement) {
     const el = area.current;
     if (!el) return;
@@ -55,7 +58,7 @@ export default function TranscriptionEditor({
   }
   function publish(value: string, caret: number, allowAuto: boolean) {
     if (autoEnglish && allowAuto && !composing.current) {
-      const change = automaticEnglish(value, caret, words);
+      const change = automaticEnglish(value, caret, words, korean);
       if (change) replace(change);
     }
     if (area.current) onInput(area.current.value);
@@ -68,6 +71,7 @@ export default function TranscriptionEditor({
       el.selectionStart,
       el.selectionEnd,
       words,
+      korean,
     );
     if (change) {
       replace(change);
@@ -121,15 +125,6 @@ export default function TranscriptionEditor({
           }
         }}
       />
-      <div className="transcription-tools">
-        <button
-          title="영문으로 쓰려던 부분만 선택하거나 커서 앞 낱말을 변환 · Ctrl+Shift+E"
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={manual}
-        >
-          한글 → 영문
-        </button>
-      </div>
     </>
   );
 }

@@ -25,12 +25,17 @@ export async function englishPdfFixture() {
   const font = await doc.embedFont(StandardFonts.Helvetica);
   for (let i = 1; i <= 2; i++) {
     const page = doc.addPage([600, 800]);
-    page.drawText("VPS26A SNX27 hear HR HER2", {
-      x: 40,
-      y: 700,
-      font,
-      size: 16,
-    });
+    page.drawText(
+      i === 1
+        ? "VPS26A SNX27 hear HR HER2 THE GREAT FUTURE AI"
+        : "VPS26A SNX27 hear HR HER2",
+      {
+        x: 40,
+        y: 700,
+        font,
+        size: 16,
+      },
+    );
     page.drawText(`English page ${i}`, { x: 40, y: 650, font, size: 12 });
   }
   return Buffer.from(await doc.save());

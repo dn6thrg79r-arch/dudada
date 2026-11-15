@@ -69,6 +69,7 @@ export default function StudyApp({
     status: "loading" | "ready" | "missing" | "error";
   } | null>(null);
   const [englishWords, setEnglishWords] = useState<string[]>([]);
+  const [koreanWords, setKoreanWords] = useState<string[]>([]);
   const [note, setNote] = useState<Notebook | null>(null),
     [shelf, setShelf] = useState<Notebook[]>([]),
     [ready, setReady] = useState(false);
@@ -303,6 +304,7 @@ export default function StudyApp({
         if (saved !== old) update({ history: saved.history });
       }
       setEnglishWords([]);
+      setKoreanWords([]);
       setShowHistory(false);
       setShowMarks(false);
     }
@@ -421,6 +423,7 @@ export default function StudyApp({
     const n = current.current;
     if (!n) return;
     setEnglishWords([]);
+    setKoreanWords([]);
     update(turnPage(n, page));
     pdfScroll.current?.scrollTo({ top: 0, left: 0 });
   }
@@ -932,6 +935,7 @@ export default function StudyApp({
                   task.current = null;
                   attachedId.current = null;
                   setEnglishWords([]);
+                  setKoreanWords([]);
                   setPdf(null);
                   setAttached(null);
                   setPdfRestore({ id: note.id, status: "missing" });
@@ -1239,7 +1243,35 @@ export default function StudyApp({
             className={`split-workspace tab-${mobileTab}`}
             style={{ "--pdf-share": `${note.split}%` } as React.CSSProperties}
           >
-            <section className="pdf-pane" aria-label="PDF 뷰어">
+            <section
+              className="pdf-pane"
+              aria-label="PDF 뷰어"
+              onKeyDown={(e) => {
+                if (
+                  !connected ||
+                  busy ||
+                  composing.current ||
+                  e.nativeEvent.isComposing ||
+                  e.nativeEvent.keyCode === 229 ||
+                  e.altKey ||
+                  e.ctrlKey ||
+                  e.metaKey ||
+                  e.shiftKey ||
+                  (e.key !== "ArrowLeft" && e.key !== "ArrowRight")
+                )
+                  return;
+                if (
+                  (e.target as HTMLElement).closest(
+                    'input,textarea,select,[contenteditable]:not([contenteditable="false"])',
+                  )
+                )
+                  return;
+                e.preventDefault();
+                const n = current.current!;
+                const next = n.pdfPage + (e.key === "ArrowRight" ? 1 : -1);
+                if (next >= 1 && next <= n.pageCount) navigate(next);
+              }}
+            >
               {focusMode && (
                 <nav
                   className="focus-page-controls"
@@ -1275,7 +1307,16 @@ export default function StudyApp({
                 className="pdf-scroll"
                 tabIndex={0}
                 aria-label="PDF 스크롤 영역"
+                aria-keyshortcuts="ArrowLeft ArrowRight"
+                title="PDF 영역을 클릭한 뒤 ←·→로 페이지 이동"
                 onMouseDown={(e) => {
+                  if (
+                    (e.target as HTMLElement).closest(
+                      "button,input,textarea,select,[contenteditable]",
+                    )
+                  )
+                    return;
+                  e.currentTarget.focus({ preventScroll: true });
                   if ((e.target as HTMLElement).tagName === "CANVAS")
                     e.preventDefault();
                 }}
@@ -1286,6 +1327,7 @@ export default function StudyApp({
                     number={note.pdfPage}
                     zoom={note.zoom}
                     onEnglishWords={setEnglishWords}
+                    onKoreanWords={setKoreanWords}
                     highlights={note.highlights}
                     onHighlight={addHighlight}
                   />
@@ -1312,6 +1354,7 @@ export default function StudyApp({
                           setError("");
                           setPdfRestore({ id: note.id, status: "loading" });
                           setEnglishWords([]);
+                          setKoreanWords([]);
                           setPdfReload((v) => v + 1);
                         }}
                       >
@@ -1376,6 +1419,7 @@ export default function StudyApp({
                 initial={note.drafts[note.editorPage] || ""}
                 fontSize={note.fontSize}
                 englishWords={englishWords}
+                koreanWords={koreanWords}
                 autoEnglish={note.autoEnglish ?? true}
                 onComposition={(active) => {
                   composing.current = active;

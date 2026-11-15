@@ -3,13 +3,14 @@ import { useEffect, useRef, useState } from "react";
 import PdfAnnotations from "./pdf-annotations";
 import type { PdfHighlight, HighlightRect } from "@/lib/study-tools";
 import { bindPdfSelection } from "@/lib/pdf-selection";
-import { pdfEnglishWords } from "@/lib/english-input";
+import { pdfEnglishWords, pdfKoreanWords } from "@/lib/english-input";
 import type { TextLayer, PDFDocumentProxy, PDFPageProxy } from "pdfjs-dist";
 export default function PdfPreview({
   document,
   number,
   zoom,
   onEnglishWords,
+  onKoreanWords,
   highlights = [],
   onHighlight,
 }: {
@@ -17,6 +18,7 @@ export default function PdfPreview({
   number: number;
   zoom: number | "fit";
   onEnglishWords?: (words: string[]) => void;
+  onKoreanWords?: (words: string[]) => void;
   highlights?: PdfHighlight[];
   onHighlight?: (page: number, text: string, rects: HighlightRect[]) => void;
 }) {
@@ -55,6 +57,7 @@ export default function PdfPreview({
       setError("");
       setTextHint("");
       onEnglishWords?.([]);
+      onKoreanWords?.([]);
       try {
         const page = await document.getPage(number);
         renderedPage = page;
@@ -101,6 +104,7 @@ export default function PdfPreview({
               "str" in item ? [item.str] : [],
             );
             onEnglishWords?.(pdfEnglishWords(strings.join(" ")));
+            onKoreanWords?.(pdfKoreanWords(strings.join(" ")));
             if (strings.some((s) => s.trim())) {
               const layer = window.document.createElement("div");
               layer.className = "pdf-text-layer";
@@ -160,7 +164,7 @@ export default function PdfPreview({
         canvas.height = 0;
       }
     };
-  }, [document, number, zoom, width, onEnglishWords]);
+  }, [document, number, zoom, width, onEnglishWords, onKoreanWords]);
   return (
     <div ref={host} className="pdf-render-host">
       <div className="pdf-render-status" role="status">
