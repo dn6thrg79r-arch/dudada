@@ -4,13 +4,11 @@ test("설명줄 없이 페이지 옆 아이콘 한 줄을 유지하고 휴대폰
   page,
 }, info) => {
   await page.goto("./local/");
-  await page
-    .getByLabel("PDF 파일 선택")
-    .setInputFiles({
-      name: "긴_병원소식지_파일이름_8페이지.pdf",
-      mimeType: "application/pdf",
-      buffer: await pdfFixture(),
-    });
+  await page.getByLabel("PDF 파일 선택").setInputFiles({
+    name: "긴_병원소식지_파일이름_8페이지.pdf",
+    mimeType: "application/pdf",
+    buffer: await pdfFixture(),
+  });
   await expect(
     page.getByRole("img", { name: "PDF 원본 1페이지", exact: true }),
   ).toBeVisible();
@@ -36,6 +34,7 @@ test("설명줄 없이 페이지 옆 아이콘 한 줄을 유지하고 휴대폰
     for (const name of [
       "현재 페이지 책갈피",
       "PDF 가리고 필사",
+      "필사 가리기",
       "필사 이전 버전",
     ]) {
       const icon = page.getByRole("button", { name, exact: true });

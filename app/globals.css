@@ -1365,3 +1365,44 @@ input:not([type="file"]):not([type="checkbox"]) {
     max-width: 100%;
   }
 }
+
+/* Hide the editor with CSS so its browser-owned draft, selection and undo survive. */
+.study-shell.pdf-only .split-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+}
+.study-shell.pdf-only .editor-pane,
+.study-shell.pdf-only .split-handle {
+  display: none;
+}
+.study-shell.pdf-only .pdf-pane {
+  display: flex;
+  width: 100%;
+}
+.focus-transcription-toggle {
+  position: absolute;
+  top: 12px;
+  right: 146px;
+  z-index: 30;
+  opacity: 0.8;
+  width: 34px;
+  height: 34px;
+  padding: 6px;
+}
+@media (max-width: 600px) {
+  .page-controls {
+    gap: 1px;
+  }
+  .page-controls > button {
+    padding: 3px;
+  }
+  .page-controls .toolbar-icon {
+    width: 24px;
+    height: 28px;
+    padding: 3px;
+  }
+  .page-number {
+    gap: 3px;
+  }
+}

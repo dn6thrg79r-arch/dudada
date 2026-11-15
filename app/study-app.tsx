@@ -21,6 +21,8 @@ import {
   History,
   PanelLeftClose,
   PanelLeftOpen,
+  PanelRightClose,
+  PanelRightOpen,
 } from "lucide-react";
 import type { PDFDocumentLoadingTask, PDFDocumentProxy } from "pdfjs-dist";
 import {
@@ -85,6 +87,14 @@ export default function StudyApp({
   // Keep IME guards in event handlers; disabled toggles flash the toolbar per syllable.
   const composing = useRef(false);
   const shell = useRef<HTMLDivElement>(null);
+  const hiddenEditor = useRef<{
+    element: HTMLTextAreaElement;
+    start: number;
+    end: number;
+    top: number;
+    left: number;
+    focused: boolean;
+  } | null>(null);
   const {
     focusMode,
     enter: enterFocus,
@@ -468,10 +478,45 @@ export default function StudyApp({
     if (composing.current) return;
     const n = current.current;
     if (n) {
-      update({ editorOnly: !n.editorOnly });
+      update({ editorOnly: !n.editorOnly, pdfOnly: false });
       setMobileTab("editor");
     }
   }
+  function toggleTranscription() {
+    if (composing.current) return;
+    const n = current.current;
+    if (!n) return;
+    if (!n.pdfOnly) {
+      const area =
+        shell.current?.querySelector<HTMLTextAreaElement>(".manuscript");
+      hiddenEditor.current = area
+        ? {
+            element: area,
+            start: area.selectionStart,
+            end: area.selectionEnd,
+            top: area.scrollTop,
+            left: area.scrollLeft,
+            focused: document.activeElement === area,
+          }
+        : null;
+    }
+    update({ pdfOnly: !n.pdfOnly, editorOnly: false });
+    setMobileTab("pdf");
+  }
+  useEffect(() => {
+    if (note?.pdfOnly || !hiddenEditor.current) return;
+    const saved = hiddenEditor.current;
+    const frame = requestAnimationFrame(() => {
+      if (saved.element === shell.current?.querySelector(".manuscript")) {
+        if (saved.focused) saved.element.focus({ preventScroll: true });
+        saved.element.setSelectionRange(saved.start, saved.end);
+        saved.element.scrollTop = saved.top;
+        saved.element.scrollLeft = saved.left;
+      }
+      hiddenEditor.current = null;
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [note?.pdfOnly, noteId, note?.editorPage]);
   const connected = !!note && attached === note.id && !!pdf;
   const restoringPdf =
     !!repository.loadPdf &&
@@ -481,7 +526,7 @@ export default function StudyApp({
   return (
     <div
       ref={shell}
-      className={`study-shell${focusMode ? " is-focused" : ""}${note?.editorOnly ? " editor-only" : ""}`}
+      className={`study-shell${focusMode ? " is-focused" : ""}${note?.pdfOnly ? " pdf-only" : note?.editorOnly ? " editor-only" : ""}`}
     >
       {focusMode && note && (
         <button
@@ -505,6 +550,22 @@ export default function StudyApp({
             <PanelLeftOpen size={16} />
           ) : (
             <PanelLeftClose size={16} />
+          )}
+        </button>
+      )}
+      {focusMode && note && (
+        <button
+          className="focus-transcription-toggle"
+          title={note.pdfOnly ? "필사 다시 보기" : "필사 가리기"}
+          aria-label={note.pdfOnly ? "필사 다시 보기" : "필사 가리기"}
+          aria-pressed={note.pdfOnly ?? false}
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={toggleTranscription}
+        >
+          {note.pdfOnly ? (
+            <PanelRightOpen size={16} />
+          ) : (
+            <PanelRightClose size={16} />
           )}
         </button>
       )}
@@ -1033,6 +1094,20 @@ export default function StudyApp({
               </button>
               <button
                 className="toolbar-icon"
+                title={note.pdfOnly ? "필사 다시 보기" : "필사 가리기"}
+                aria-label={note.pdfOnly ? "필사 다시 보기" : "필사 가리기"}
+                aria-pressed={note.pdfOnly ?? false}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={toggleTranscription}
+              >
+                {note.pdfOnly ? (
+                  <PanelRightOpen size={16} />
+                ) : (
+                  <PanelRightClose size={16} />
+                )}
+              </button>
+              <button
+                className="toolbar-icon"
                 title="필사 이전 버전"
                 aria-label="필사 이전 버전"
                 onClick={() => setShowHistory(true)}
@@ -1151,7 +1226,10 @@ export default function StudyApp({
             </button>
             <button
               className={mobileTab === "editor" ? "active" : ""}
-              onClick={() => setMobileTab("editor")}
+              onClick={() => {
+                if (note.pdfOnly) update({ pdfOnly: false });
+                setMobileTab("editor");
+              }}
             >
               필사하기
             </button>

@@ -863,6 +863,22 @@ test("형광펜·책갈피·이전 버전·PDF 가리기를 같은 계정의 다
       "data-save-state",
       "saved",
     );
+    await b.getByRole("button", { name: "필사 가리기", exact: true }).click();
+    await expect(b.locator(".save-state")).toHaveAttribute(
+      "data-save-state",
+      "saved",
+    );
+    await a.reload();
+    await expect(a.getByRole("textbox", { name: "필사 편집기" })).toBeHidden();
+    await expect(
+      a.getByRole("img", { name: "PDF 원본 1페이지", exact: true }),
+    ).toBeVisible();
+    await a
+      .getByRole("button", { name: "필사 다시 보기", exact: true })
+      .click();
+    await expect(a.getByRole("textbox", { name: "필사 편집기" })).toHaveValue(
+      original,
+    );
     expect(service.notes.size).toBe(1);
     await b.getByRole("button", { name: "로그아웃", exact: true }).click();
     await login(b, "다른공부도구계정", "1234");

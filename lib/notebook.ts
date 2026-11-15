@@ -20,6 +20,7 @@ export type Notebook = {
   bookmarks?: Bookmark[];
   history?: Record<string, DraftVersion[]>;
   editorOnly?: boolean;
+  pdfOnly?: boolean;
 };
 export function createNotebook(
   name: string,
