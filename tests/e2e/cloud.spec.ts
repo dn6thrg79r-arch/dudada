@@ -1,4 +1,5 @@
 import { test, expect, type BrowserContext, type Page } from "@playwright/test";
+import { officeFixture, hwpFixture, photo } from "./reading-fixture";
 import { pptxFixture } from "./pptx-fixture";
 import { pdfFixture } from "./pdf-fixture";
 import { createHash } from "node:crypto";
@@ -908,14 +909,12 @@ test("PPTX 원본과 슬라이드별 필사를 기존 계정 저장소로 다른
     second = await b.newPage();
   await login(first, "발표자료계정");
   const buffer = await pptxFixture();
-  await first
-    .getByLabel("학습 자료 파일 선택")
-    .setInputFiles({
-      name: "연구발표.pptx",
-      mimeType:
-        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-      buffer,
-    });
+  await first.getByLabel("학습 자료 파일 선택").setInputFiles({
+    name: "연구발표.pptx",
+    mimeType:
+      "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    buffer,
+  });
   await expect(
     first
       .frameLocator("iframe")
@@ -946,3 +945,68 @@ test("PPTX 원본과 슬라이드별 필사를 기존 계정 저장소로 다른
   await a.close();
   await b.close();
 });
+
+for (const kind of ["docx", "hwpx", "hwp", "txt", "md", "image"] as const) {
+  test(`${kind} 원본·필사를 같은 계정의 다른 브라우저에서 자동으로 복원한다`, async ({
+    browser,
+    baseURL,
+  }) => {
+    const service = backend();
+    const a = await browser.newContext({ baseURL }),
+      b = await browser.newContext({ baseURL });
+    try {
+      await service.install(a);
+      await service.install(b);
+      const first = await a.newPage(),
+        second = await b.newPage();
+      await login(first, "새자료계정");
+      const name = kind === "image" ? "교재사진.png" : `한글자료.${kind}`;
+      const buffer =
+        kind === "docx" || kind === "hwpx"
+          ? await officeFixture(kind)
+          : kind === "hwp"
+            ? hwpFixture()
+            : kind === "image"
+              ? photo
+              : Buffer.from(
+                  kind === "md"
+                    ? "# 한국어 암기노트\n\nAI 연구 결과 123명"
+                    : "한국어 원문 123명",
+                );
+      await first
+        .getByLabel("학습 자료 파일 선택")
+        .setInputFiles({ name, mimeType: "application/octet-stream", buffer });
+      await expect(first.locator(".reading-paper")).toBeVisible();
+      await first
+        .getByRole("textbox", { name: "필사 편집기" })
+        .fill(`${kind} 자유 필사 기록`);
+      await first.getByLabel("문서 확대 비율").selectOption("125");
+      await expect(first.locator(".save-state")).toHaveAttribute(
+        "data-save-state",
+        "saved",
+      );
+      await expect.poll(() => service.objects.size).toBeGreaterThan(0);
+      expect(Buffer.concat([...service.objects.values()]).equals(buffer)).toBe(
+        true,
+      );
+      await login(second, "새자료계정");
+      await expect(second.locator(".reading-paper")).toBeVisible();
+      if (kind === "image")
+        await expect(second.locator(".reading-paper img")).toBeVisible();
+      else
+        await expect(second.locator(".reading-paper")).toContainText("한국어");
+      await expect(second.getByLabel("문서 확대 비율")).toHaveValue("125");
+      await expect(
+        second.getByRole("textbox", { name: "필사 편집기" }),
+      ).toHaveValue(`${kind} 자유 필사 기록`);
+      await second
+        .getByRole("button", { name: "로그아웃", exact: true })
+        .click();
+      await login(second, "다른자료계정");
+      await expect(second.locator(".reading-paper")).toHaveCount(0);
+    } finally {
+      await a.close();
+      await b.close();
+    }
+  });
+}

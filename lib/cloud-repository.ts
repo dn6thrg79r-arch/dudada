@@ -1,3 +1,4 @@
+import { sourceMime } from "./source-types";
 import { stageDraft, clearDraft, pendingDrafts } from "./cloud-cache";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Notebook } from "./notebook";
@@ -182,9 +183,7 @@ export function createCloudRepository(
         parts.push(data);
       }
       const file = new File(parts, info.name, {
-        type: /\.pptx$/i.test(info.name)
-          ? "application/vnd.openxmlformats-officedocument.presentationml.presentation"
-          : "application/pdf",
+        type: sourceMime(info.name),
         lastModified: info.modified,
       });
       if (file.size !== info.size)

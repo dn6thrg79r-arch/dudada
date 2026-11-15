@@ -14,3 +14,7 @@ test-results/
 *.pptx
 *.ppt
 public/pptx/
+
+*.docx
+*.hwpx
+*.hwp

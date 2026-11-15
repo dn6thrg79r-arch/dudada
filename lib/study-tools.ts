@@ -124,7 +124,7 @@ export function selectionHighlight(
 ): { text: string; rects: HighlightRect[] } | null {
   if (!selection?.rangeCount || selection.isCollapsed) return null;
   const range = selection.getRangeAt(0),
-    layer = frame.querySelector(".pdf-text-layer");
+    layer = frame.querySelector(".pdf-text-layer, .reading-paper");
   if (
     !layer?.contains(range.startContainer) ||
     !layer.contains(range.endContainer)

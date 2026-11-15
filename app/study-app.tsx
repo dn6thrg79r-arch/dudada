@@ -41,6 +41,13 @@ import { pdfEnglishWords, pdfKoreanWords } from "@/lib/english-input";
 import { openPdf, pdfError } from "@/lib/pdf";
 import PdfPreview from "./pdf-preview";
 import PresentationPreview from "./presentation-preview";
+import ReadingPreview from "./reading-preview";
+import {
+  openReading,
+  disposeReading,
+  type ReadingDocument,
+} from "@/lib/reading";
+import { SOURCE_ACCEPT, sourceKind, sourceName } from "@/lib/source-types";
 import {
   MAX_PRESENTATION_BYTES,
   openPresentation,
@@ -71,6 +78,8 @@ export default function StudyApp({
   const [presentation, setPresentation] = useState<PresentationDocument | null>(
     null,
   );
+  const [reading, setReading] = useState<ReadingDocument | null>(null);
+  useEffect(() => () => disposeReading(reading), [reading]);
   const [showHistory, setShowHistory] = useState(false);
   const [showMarks, setShowMarks] = useState(false);
   const [pdfReload, setPdfReload] = useState(0);
@@ -210,7 +219,27 @@ export default function StudyApp({
           return;
         }
         savedFile = file;
-        if (/\.pptx$/i.test(file.name)) {
+        const kind = sourceKind(file.name);
+        if (!kind) throw new Error("지원하지 않는 자료 형식입니다.");
+        if (kind !== "pdf" && kind !== "pptx") {
+          const opened = await openReading(file, kind, () => {});
+          if (
+            cancelled ||
+            current.current?.id !== target.id ||
+            attachedId.current === target.id
+          ) {
+            disposeReading(opened);
+            return;
+          }
+          const old = task.current;
+          task.current = null;
+          attachedId.current = target.id;
+          setPdf(null);
+          setPresentation(null);
+          setReading(opened);
+          setAttached(target.id);
+          void old?.destroy();
+        } else if (kind === "pptx") {
           const slides = await openPresentation(file, () => {});
           if (
             cancelled ||
@@ -222,6 +251,7 @@ export default function StudyApp({
           task.current = null;
           attachedId.current = target.id;
           setPdf(null);
+          setReading(null);
           setPresentation(slides);
           setAttached(target.id);
           void old?.destroy();
@@ -246,6 +276,7 @@ export default function StudyApp({
           task.current = opened.task;
           attachedId.current = target.id;
           setPresentation(null);
+          setReading(null);
           setPdf(opened.document);
           setAttached(target.id);
           void old?.destroy();
@@ -262,7 +293,7 @@ export default function StudyApp({
           }
           setPdfRestore({ id: target.id, status: "error" });
           setError(
-            `저장된 ${target.kind === "pptx" ? "PPTX" : "PDF"}를 열지 못했습니다. 연결 상태를 확인하고 다시 시도해 주세요. ${target.kind === "pptx" && e instanceof Error ? e.message : pdfError(e)}`,
+            `저장된 ${sourceName(target.kind)}를 열지 못했습니다. 연결 상태를 확인하고 다시 시도해 주세요. ${target.kind && target.kind !== "pdf" && e instanceof Error ? e.message : pdfError(e)}`,
           );
         }
       }
@@ -275,13 +306,14 @@ export default function StudyApp({
     };
   }, [noteId, repository, pdfReload]);
   useEffect(() => {
-    if (!presentation || attached !== noteId) return;
-    const text = presentation.texts[(note?.pdfPage || 1) - 1] || "";
+    const source = presentation || reading;
+    if (!source || attached !== noteId) return;
+    const text = source.texts[(note?.pdfPage || 1) - 1] || "";
     Promise.resolve().then(() => {
       setEnglishWords(pdfEnglishWords(text));
       setKoreanWords(pdfKoreanWords(text));
     });
-  }, [presentation, attached, noteId, note?.pdfPage]);
+  }, [presentation, reading, attached, noteId, note?.pdfPage]);
   function update(change: Partial<Notebook>) {
     if (
       composing.current &&
@@ -374,12 +406,15 @@ export default function StudyApp({
   }
   async function load(file: File) {
     if (opening.current) return;
-    const isPptx = /\.pptx$/i.test(file.name);
-    if (!/\.(pdf|pptx)$/i.test(file.name)) {
+    const kind = sourceKind(file.name);
+    const isPptx = kind === "pptx";
+    if (!kind) {
       setError(
         /\.ppt$/i.test(file.name)
           ? "예전 PPT 파일은 PPTX 또는 PDF로 저장한 뒤 불러와 주세요."
-          : "PDF 또는 PPTX 파일을 선택해 주세요.",
+          : /\.doc$/i.test(file.name)
+            ? "예전 Word DOC 파일은 DOCX 또는 PDF로 저장해 주세요."
+            : "PDF·PPTX·TXT·Markdown·DOCX·HWPX·HWP·사진(JPG·PNG·WebP)을 선택해 주세요.",
       );
       return;
     }
@@ -397,17 +432,25 @@ export default function StudyApp({
     setBusy(true);
     setProgress(0);
     setError("");
-    setRetryFile(isPptx ? null : file);
+    setRetryFile(kind === "pdf" ? file : null);
     let opened: Awaited<ReturnType<typeof openPdf>> | null = null;
+    let document: ReadingDocument | null = null;
+    let readingActivated = false;
     try {
       const slides = isPptx ? await openPresentation(file, setProgress) : null;
-      if (!isPptx)
+      if (kind !== "pdf" && kind !== "pptx")
+        document = await openReading(file, kind, setProgress);
+      if (kind === "pdf")
         opened = await openPdf(file, password, setProgress, (t) => {
           loading.current = t;
         });
       const doc = opened?.document;
-      const count = slides?.pageCount || doc!.numPages;
-      const fingerprint = slides?.fingerprint || doc!.fingerprints[0] || "";
+      const count = document?.pageCount || slides?.pageCount || doc!.numPages;
+      const fingerprint =
+        document?.fingerprint ||
+        slides?.fingerprint ||
+        doc!.fingerprints[0] ||
+        "";
       const existing = current.current;
       if (
         reconnect.current &&
@@ -433,11 +476,11 @@ export default function StudyApp({
             ...match,
             fingerprint,
             fileSize: file.size,
-            kind: isPptx ? ("pptx" as const) : ("pdf" as const),
+            kind,
           }
         : {
             ...createNotebook(file.name, count, fingerprint, file.size),
-            kind: isPptx ? ("pptx" as const) : ("pdf" as const),
+            kind,
           };
       if (!next) throw new Error("연결할 필사 자료를 선택해 주세요.");
       if (repository.savePdf && !match) await repository.saveNotebook(next);
@@ -446,6 +489,8 @@ export default function StudyApp({
       attachedId.current = next.id;
       setPdf(doc || null);
       setPresentation(slides);
+      setReading(document);
+      readingActivated = true;
       setAttached(next.id);
       activate(next);
       void old?.destroy();
@@ -459,11 +504,12 @@ export default function StudyApp({
       setRetryFile(null);
       setMobileTab("pdf");
     } catch (e) {
+      if (!readingActivated) disposeReading(document);
       if (opened && task.current !== opened.task) await opened.task.destroy();
       setError(
         e instanceof Error && e.message.startsWith("연결할")
           ? e.message
-          : isPptx && e instanceof Error
+          : kind !== "pdf" && e instanceof Error
             ? e.message
             : pdfError(e),
       );
@@ -576,8 +622,10 @@ export default function StudyApp({
     });
     return () => cancelAnimationFrame(frame);
   }, [note?.pdfOnly, noteId, note?.editorPage]);
-  const sourceLabel = note?.kind === "pptx" ? "PPTX" : "PDF";
-  const connected = !!note && attached === note.id && !!(pdf || presentation);
+  const sourceLabel = sourceName(note?.kind);
+  const sourceObject = note?.kind === "image" ? "사진을" : `${sourceLabel}를`;
+  const connected =
+    !!note && attached === note.id && !!(pdf || presentation || reading);
   const restoringPdf =
     !!repository.loadPdf &&
     !!note &&
@@ -601,8 +649,16 @@ export default function StudyApp({
       {focusMode && note && (
         <button
           className="focus-writing-toggle"
-          title={note.editorOnly ? "PDF 다시 보기" : "PDF 가리고 필사"}
-          aria-label={note.editorOnly ? "PDF 다시 보기" : "PDF 가리고 필사"}
+          title={
+            note.editorOnly
+              ? `${sourceLabel} 다시 보기`
+              : `${sourceLabel} 가리고 필사`
+          }
+          aria-label={
+            note.editorOnly
+              ? `${sourceLabel} 다시 보기`
+              : `${sourceLabel} 가리고 필사`
+          }
           onMouseDown={(e) => e.preventDefault()}
           onClick={toggleWriting}
         >
@@ -644,7 +700,7 @@ export default function StudyApp({
         className="sr-only"
         ref={picker}
         type="file"
-        accept="application/pdf,.pdf,application/vnd.openxmlformats-officedocument.presentationml.presentation,.pptx"
+        accept={SOURCE_ACCEPT}
         aria-label="학습 자료 파일 선택"
         disabled={!ready || busy}
         onChange={(e) => {
@@ -824,7 +880,7 @@ export default function StudyApp({
               </button>
             ))
           ) : (
-            <p>PDF를 불러오면 필사 자료가 여기에 저장됩니다.</p>
+            <p>자료를 불러오면 필사 자료가 여기에 저장됩니다.</p>
           )}
         </section>
       )}
@@ -868,11 +924,11 @@ export default function StudyApp({
                 })
               }
             />{" "}
-            PDF 페이지에 맞춰 필사 전환
+            {sourceLabel} 페이지에 맞춰 필사 전환
           </label>
           <label
             className="check-label"
-            title="현재 PDF 원문 영단어와 맞는 한/영 자판 오타만 조합을 마친 뒤 바꿉니다."
+            title="현재 원문 영단어와 맞는 한/영 자판 오타만 조합을 마친 뒤 바꿉니다."
           >
             <input
               type="checkbox"
@@ -986,7 +1042,7 @@ export default function StudyApp({
               onClick={async () => {
                 if (
                   !confirm(
-                    "이 자료의 저장된 PDF만 삭제할까요? 필사 글은 남습니다.",
+                    `이 자료의 저장된 ${sourceLabel}만 삭제할까요? 필사 글은 남습니다.`,
                   )
                 )
                   return;
@@ -999,6 +1055,7 @@ export default function StudyApp({
                   setKoreanWords([]);
                   setPdf(null);
                   setPresentation(null);
+                  setReading(null);
                   setAttached(null);
                   setPdfRestore({ id: note.id, status: "missing" });
                 } catch (e) {
@@ -1008,7 +1065,7 @@ export default function StudyApp({
                 }
               }}
             >
-              저장된 PDF 삭제
+              저장된 {sourceLabel} 삭제
             </button>
           )}
           {note?.legacyText && (
@@ -1099,10 +1156,14 @@ export default function StudyApp({
                 <ChevronLeft size={18} />
               </button>
               <label className="page-number">
-                <span className="sr-only">현재 PDF 페이지</span>
+                <span className="sr-only">현재 {sourceLabel} 페이지</span>
                 <select
                   aria-label={
-                    presentation ? "현재 슬라이드" : "현재 PDF 페이지"
+                    presentation
+                      ? "현재 슬라이드"
+                      : reading
+                        ? "현재 문서 페이지"
+                        : "현재 PDF 페이지"
                   }
                   value={note.pdfPage}
                   onChange={(e) => navigate(+e.target.value)}
@@ -1147,9 +1208,15 @@ export default function StudyApp({
               </button>
               <button
                 className="toolbar-icon"
-                title={note.editorOnly ? "PDF 다시 보기" : "PDF 가리고 필사"}
+                title={
+                  note.editorOnly
+                    ? `${sourceLabel} 다시 보기`
+                    : `${sourceLabel} 가리고 필사`
+                }
                 aria-label={
-                  note.editorOnly ? "PDF 다시 보기" : "PDF 가리고 필사"
+                  note.editorOnly
+                    ? `${sourceLabel} 다시 보기`
+                    : `${sourceLabel} 가리고 필사`
                 }
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={toggleWriting}
@@ -1191,7 +1258,7 @@ export default function StudyApp({
               }}
             >
               <button
-                aria-label="PDF 축소"
+                aria-label={`${sourceLabel} 축소`}
                 onClick={() =>
                   update({
                     zoom: clamp(
@@ -1206,7 +1273,11 @@ export default function StudyApp({
               </button>
               <select
                 aria-label={
-                  presentation ? "슬라이드 확대 비율" : "PDF 확대 비율"
+                  presentation
+                    ? "슬라이드 확대 비율"
+                    : reading
+                      ? "문서 확대 비율"
+                      : "PDF 확대 비율"
                 }
                 value={note.zoom}
                 onChange={(e) =>
@@ -1225,7 +1296,7 @@ export default function StudyApp({
                 )}
               </select>
               <button
-                aria-label="PDF 확대"
+                aria-label={`${sourceLabel} 확대`}
                 onClick={() =>
                   update({
                     zoom: clamp(
@@ -1239,7 +1310,7 @@ export default function StudyApp({
                 <Plus size={16} />
               </button>
               <button
-                aria-label="PDF 화면 너비에 맞추기"
+                aria-label={`${sourceLabel} 화면 너비에 맞추기`}
                 onClick={() => update({ zoom: "fit" })}
               >
                 <Maximize size={16} />
@@ -1292,7 +1363,9 @@ export default function StudyApp({
                 setMobileTab("pdf");
               }}
             >
-              PDF 보기
+              {note && note.kind && note.kind !== "pdf"
+                ? "원문 보기"
+                : "PDF 보기"}
             </button>
             <button
               className={mobileTab === "editor" ? "active" : ""}
@@ -1311,7 +1384,13 @@ export default function StudyApp({
           >
             <section
               className="pdf-pane"
-              aria-label={presentation ? "프레젠테이션 뷰어" : "PDF 뷰어"}
+              aria-label={
+                presentation
+                  ? "프레젠테이션 뷰어"
+                  : reading
+                    ? "문서 뷰어"
+                    : "PDF 뷰어"
+              }
               onKeyDown={(e) => {
                 if (
                   !connected ||
@@ -1372,9 +1451,9 @@ export default function StudyApp({
                 ref={pdfScroll}
                 className="pdf-scroll"
                 tabIndex={0}
-                aria-label="PDF 스크롤 영역"
+                aria-label={`${sourceLabel} 스크롤 영역`}
                 aria-keyshortcuts="ArrowLeft ArrowRight"
-                title="PDF 영역을 클릭한 뒤 ←·→로 페이지 이동"
+                title={`${sourceLabel} 영역을 클릭한 뒤 ←·→로 페이지 이동`}
                 onMouseDown={(e) => {
                   if (
                     (e.target as HTMLElement).closest(
@@ -1387,7 +1466,15 @@ export default function StudyApp({
                     e.preventDefault();
                 }}
               >
-                {connected && presentation ? (
+                {connected && reading ? (
+                  <ReadingPreview
+                    document={reading}
+                    number={note.pdfPage}
+                    zoom={note.zoom}
+                    highlights={note.highlights}
+                    onHighlight={addHighlight}
+                  />
+                ) : connected && presentation ? (
                   <PresentationPreview
                     document={presentation}
                     number={note.pdfPage}
@@ -1412,7 +1499,7 @@ export default function StudyApp({
                 ) : restoringPdf ? (
                   <div className="reconnect" role="status" aria-live="polite">
                     <BookOpen size={40} />
-                    <h2>보고 있던 {sourceLabel}를 불러오고 있어요.</h2>
+                    <h2>보고 있던 {sourceObject} 불러오고 있어요.</h2>
                     <p>{note.pdfPage}페이지부터 이어서 열어요.</p>
                   </div>
                 ) : (
@@ -1420,7 +1507,7 @@ export default function StudyApp({
                     <BookOpen size={40} />
                     <h2>필사는 그대로 남아 있어요.</h2>
                     <p>
-                      원본 {sourceLabel}를 다시 선택하면
+                      원본 {sourceObject} 다시 선택하면
                       <br />
                       이어서 읽을 수 있어요.
                     </p>
@@ -1448,7 +1535,7 @@ export default function StudyApp({
                     </button>
                     <small>
                       {repository.savePdf
-                        ? `${sourceLabel}가 저장되지 않았거나 연결에 실패했습니다. 원본을 선택하면 다시 저장합니다.`
+                        ? `${sourceLabel}${note.kind === "image" ? "이" : "가"} 저장되지 않았거나 연결에 실패했습니다. 원본을 선택하면 다시 저장합니다.`
                         : `${sourceLabel} 원본은 자동 저장하지 않습니다.`}
                     </small>
                   </div>
@@ -1546,12 +1633,12 @@ export default function StudyApp({
             >
               자료 불러오기
             </button>
-            <small>또는 PDF·PPTX 파일을 이곳에 놓아 주세요.</small>
+            <small>PDF·PPTX·TXT·MD·DOCX·HWPX·HWP·사진을 놓아 주세요.</small>
           </div>
           <p className="local-note">
             <ShieldCheck size={15} />{" "}
             {repository.savePdf
-              ? "PDF와 필사는 로그인한 계정의 비공개 공간에 저장됩니다."
+              ? "자료와 필사는 로그인한 계정의 비공개 공간에 저장됩니다."
               : "파일과 필사는 이 브라우저에서만 처리됩니다."}
           </p>
         </main>
