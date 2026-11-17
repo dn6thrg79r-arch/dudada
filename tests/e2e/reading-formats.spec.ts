@@ -159,3 +159,60 @@ test("암호 HWP·잘못된 XML·가짜 사진·빈 텍스트를 안내하며 �
     await expect(editor).toHaveValue("유실되면 안 되는 필사");
   }
 });
+
+for (const kind of ["docx", "hwpx"] as const) {
+  test(`${kind}: 필요한 그림은 다른 폴더에서도 찾고 사용하지 않는 큰 글꼴은 풀지 않는다`, async ({
+    page,
+  }) => {
+    const { default: Zip } = await import("jszip");
+    const zip = await Zip.loadAsync(await officeFixture(kind));
+    const oldPath =
+      kind === "docx" ? "word/media/image1.png" : "BinData/image1.png";
+    zip.file(
+      "shared/artwork.png",
+      await zip.file(oldPath)!.async("uint8array"),
+    );
+    zip.remove(oldPath);
+    const references =
+      kind === "docx" ? "word/_rels/document.xml.rels" : "Contents/content.hpf";
+    zip.file(
+      references,
+      (await zip.file(references)!.async("string")).replace(
+        kind === "docx" ? "media/image1.png" : "../BinData/image1.png",
+        "../shared/artwork.png",
+      ),
+    );
+    if (kind === "hwpx")
+      zip.file("Contents/section99.xml", "<unused-invalid-xml");
+    const unused = "unused/font.bin";
+    zip.file(unused, new Uint8Array(8 * 1024 * 1024));
+    const buffer = await zip.generateAsync({
+      type: "nodebuffer",
+      compression: "DEFLATE",
+    });
+    // Invalid DEFLATE in an unreferenced font proves the reading view never
+    // decompresses it. The complete ZIP directory still passes size/path checks.
+    for (let at = 0; at < buffer.length - 30; at++) {
+      if (buffer.readUInt32LE(at) !== 0x04034b50) continue;
+      const n = buffer.readUInt16LE(at + 26),
+        extra = buffer.readUInt16LE(at + 28);
+      if (buffer.subarray(at + 30, at + 30 + n).toString() === unused) {
+        buffer[at + 30 + n + extra] = 7;
+        break;
+      }
+    }
+    await page.goto("./local/");
+    await page.getByLabel("학습 자료 파일 선택").setInputFiles({
+      name: `한국어.${kind}`,
+      mimeType: "application/octet-stream",
+      buffer,
+    });
+    await expect(page.locator(".reading-paper")).toContainText("한국어");
+    await expect(page.locator(".reading-paper img")).toBeVisible();
+    expect(
+      await page
+        .locator(".reading-paper img")
+        .evaluate((el: HTMLImageElement) => el.naturalWidth),
+    ).toBe(120);
+  });
+}

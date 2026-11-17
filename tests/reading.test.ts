@@ -2,7 +2,11 @@ import { it, expect } from "vitest";
 import JSZip from "jszip";
 import { decodeStudyText, paginateReading, blockText } from "../lib/reading";
 import { readHwp, readHwpParagraphs } from "../lib/reading-hwp";
-import { checkDocumentZip, localPart } from "../lib/document-archive";
+import {
+  checkDocumentZip,
+  localPart,
+  readDocumentZip,
+} from "../lib/document-archive";
 import { sourceKind, sourceMime } from "../lib/source-types";
 import { hwpFixture } from "./e2e/reading-fixture";
 it("UTF-8·UTF-16·한국어 CP949 TXT를 줄바꿈 손실 없이 읽고 바이너리를 거절한다", () => {
@@ -103,4 +107,36 @@ it("원본 확장자별 MIME을 복원하고 지원하지 않는 실행 파일�
   expect(sourceMime("자료.docx")).toContain("wordprocessingml");
   expect(sourceKind("앱.exe")).toBeNull();
   expect(sourceKind("옛파일.doc")).toBeNull();
+});
+
+it("읽기 화면에 필요한 파일만 풀고, 생략하는 파일도 경로와 전체 용량을 검사한다", async () => {
+  const zip = new JSZip();
+  zip.file("word/document.xml", "본문");
+  zip.file("word/fonts/unused.dat", new Uint8Array(10 * 1024 * 1024));
+  zip.file("docProps/thumbnail.bin", new Uint8Array(1024));
+  const bytes = await zip.generateAsync({
+    type: "arraybuffer",
+    compression: "DEFLATE",
+  });
+  const progress: number[] = [];
+  const result = await readDocumentZip(
+    bytes,
+    (n) => progress.push(n),
+    (name) => name === "word/document.xml",
+  );
+  expect([...result.keys()]).toEqual(["word/document.xml"]);
+  expect(new TextDecoder().decode(result.get("word/document.xml"))).toBe(
+    "본문",
+  );
+  expect(progress.at(-1)).toBe(75);
+  zip.file("../unused.dat", "invalid");
+  await expect(
+    zip.generateAsync({ type: "arraybuffer" }).then((b) =>
+      readDocumentZip(
+        b,
+        () => {},
+        (name) => name === "word/document.xml",
+      ),
+    ),
+  ).rejects.toThrow("경로");
 });

@@ -79,9 +79,7 @@ test("서버 없이 PPTX의 한국어·표·이미지를 읽고 슬라이드별 
   expect(outside).toEqual([]);
 });
 
-test("잘못된 PPTX와 예전 PPT 파일은 원인을 안내한다", async ({
-  page,
-}) => {
+test("잘못된 PPTX와 예전 PPT 파일은 원인을 안내한다", async ({ page }) => {
   await page.goto("./local/");
   const picker = page.getByLabel("학습 자료 파일 선택");
   await picker.setInputFiles({
@@ -112,13 +110,11 @@ test("PPTX의 실제 슬라이드 순서를 따르고 확대 중 편집기 DOM�
     xml.replace(/(<p:sldId[^>]*\/>)(<p:sldId[^>]*\/>)/, "$2$1"),
   );
   await page.goto("./local/");
-  await page
-    .getByLabel("학습 자료 파일 선택")
-    .setInputFiles({
-      name: "순서변경.pptx",
-      mimeType: "application/octet-stream",
-      buffer: await zip.generateAsync({ type: "nodebuffer" }),
-    });
+  await page.getByLabel("학습 자료 파일 선택").setInputFiles({
+    name: "순서변경.pptx",
+    mimeType: "application/octet-stream",
+    buffer: await zip.generateAsync({ type: "nodebuffer" }),
+  });
   await expect(
     page
       .frameLocator("iframe")
@@ -137,4 +133,71 @@ test("PPTX의 실제 슬라이드 순서를 따르고 확대 중 편집기 DOM�
       .frameLocator("iframe")
       .getByText("AI와 THE GREAT FUTURE", { exact: true }),
   ).toBeVisible();
+});
+
+test("PPTX 사진은 STORE·DEFLATE 원래 압축 방식을 그대로 재사용한다", async ({
+  page,
+}) => {
+  const { default: Zip } = await import("jszip");
+  await page.addInitScript(() => {
+    window.addEventListener("message", (event) => {
+      if (
+        event.data?.type !== "load" ||
+        !(event.data.bytes instanceof ArrayBuffer)
+      )
+        return;
+      const v = new DataView(event.data.bytes),
+        methods: number[] = [];
+      for (let at = 0; at < v.byteLength - 46; at++) {
+        if (v.getUint32(at, true) !== 0x02014b50) continue;
+        const n = v.getUint16(at + 28, true),
+          name = new TextDecoder().decode(
+            new Uint8Array(event.data.bytes, at + 46, n),
+          );
+        if (name.startsWith("ppt/media/") && !name.endsWith("/"))
+          methods.push(v.getUint16(at + 10, true));
+      }
+      (window as unknown as { testMediaMethods: number[] }).testMediaMethods =
+        methods;
+    });
+  });
+  await page.goto("./local/");
+  for (const method of ["STORE", "DEFLATE"] as const) {
+    const zip = await Zip.loadAsync(await pptxFixture());
+    for (const name of Object.keys(zip.files).filter(
+      (n) => n.startsWith("ppt/media/") && !n.endsWith("/"),
+    ))
+      zip.file(name, await zip.file(name)!.async("uint8array"), {
+        compression: method,
+      });
+    await page.getByLabel("학습 자료 파일 선택").setInputFiles({
+      name: `사진_${method}.pptx`,
+      mimeType: "application/octet-stream",
+      buffer: await zip.generateAsync({
+        type: "nodebuffer",
+        compression: "DEFLATE",
+      }),
+    });
+    const frame = page.frameLocator(
+      'iframe[title="프레젠테이션 원본 1슬라이드"]',
+    );
+    await expect(
+      frame.getByText("두다다 공부방 · 첫 슬라이드", { exact: true }),
+    ).toBeVisible();
+    await expect
+      .poll(() =>
+        frame
+          .locator("body")
+          .evaluate(() =>
+            Array.from(
+              new Set(
+                (window as unknown as { testMediaMethods?: number[] })
+                  .testMediaMethods || [],
+              ),
+            ),
+          ),
+      )
+      .toEqual([method === "STORE" ? 0 : 8]);
+    await expect(frame.locator("img").first()).toBeVisible();
+  }
 });

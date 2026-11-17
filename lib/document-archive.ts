@@ -103,31 +103,45 @@ async function boundedEntry(
     stream.resume();
   });
 }
-export async function readDocumentZip(
-  bytes: ArrayBuffer,
-  progress: (n: number) => void,
-) {
+export async function openDocumentZip(bytes: ArrayBuffer) {
   const names = checkDocumentZip(bytes);
   const { default: Zip } = await import("jszip");
   const zip = await Zip.loadAsync(bytes),
     files = new Map<string, Uint8Array>();
-  let size = 0,
-    done = 0;
-  for (const name of names) {
-    const entry = zip.file(name);
-    if (!entry) continue;
-    const data = await boundedEntry(
-      entry,
-      Math.min(
-        LIMIT - size,
-        /\.(xml|rels|hpf)$/i.test(name) ? 8 * 1024 * 1024 : LIMIT,
-      ),
-    );
-    size += data.length;
-    files.set(name, data);
-    progress(10 + Math.round((++done / names.size) * 65));
+  let size = 0;
+  return {
+    names,
+    files,
+    async read(name: string) {
+      if (files.has(name)) return files.get(name);
+      const entry = zip.file(name);
+      if (!entry || !names.has(name)) return undefined;
+      const data = await boundedEntry(
+        entry,
+        Math.min(
+          LIMIT - size,
+          /\.(xml|rels|hpf)$/i.test(name) ? 8 * 1024 * 1024 : LIMIT,
+        ),
+      );
+      size += data.length;
+      files.set(name, data);
+      return data;
+    },
+  };
+}
+export async function readDocumentZip(
+  bytes: ArrayBuffer,
+  progress: (n: number) => void,
+  include: (name: string) => boolean = () => true,
+) {
+  const archive = await openDocumentZip(bytes);
+  const selected = [...archive.names].filter(include);
+  let done = 0;
+  for (const name of selected) {
+    await archive.read(name);
+    progress(10 + Math.round((++done / selected.length) * 65));
   }
-  return files;
+  return archive.files;
 }
 export function documentXml(bytes?: Uint8Array) {
   if (!bytes) throw new Error("문서의 본문 정보를 찾지 못했습니다.");

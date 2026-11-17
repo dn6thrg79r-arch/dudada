@@ -1,4 +1,5 @@
 import { sourceMime } from "./source-types";
+import { transferPool } from "./transfer-pool";
 import { stageDraft, clearDraft, pendingDrafts } from "./cloud-cache";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Notebook } from "./notebook";
@@ -117,22 +118,27 @@ export function createCloudRepository(
       const count = Math.ceil(file.size / PDF_CHUNK_BYTES);
       const paths = pdfChunkPaths(prefix, count);
       const uploaded: string[] = [];
+      let completedBytes = 0;
       try {
-        for (let i = 0; i < count; i++) {
+        await transferPool(count, async (i) => {
+          const part = file.slice(
+            i * PDF_CHUNK_BYTES,
+            (i + 1) * PDF_CHUNK_BYTES,
+          );
           const { error } = await client.storage
             .from(BUCKET)
-            .upload(
-              paths[i],
-              file.slice(i * PDF_CHUNK_BYTES, (i + 1) * PDF_CHUNK_BYTES),
-              { contentType: "application/octet-stream", upsert: false },
-            );
+            .upload(paths[i], part, {
+              contentType: "application/octet-stream",
+              upsert: false,
+            });
           if (error)
             throw new Error(
               "PDF 저장에 실패했습니다. 인터넷 연결과 저장 공간을 확인하고 다시 시도해 주세요.",
             );
           uploaded.push(paths[i]);
-          onProgress(Math.round(((i + 1) / count) * 100));
-        }
+          completedBytes += part.size;
+          onProgress(Math.round((completedBytes / file.size) * 100));
+        });
         const value: PdfManifest = {
           prefix,
           chunks: count,
@@ -171,17 +177,17 @@ export function createCloudRepository(
         throw new Error(
           "저장된 PDF 정보가 올바르지 않습니다. 원본을 다시 선택해 주세요.",
         );
-      const parts: Blob[] = [];
-      for (const path of pdfChunkPaths(info.prefix, info.chunks)) {
+      const paths = pdfChunkPaths(info.prefix, info.chunks);
+      const parts = await transferPool(info.chunks, async (i) => {
         const { data, error } = await client.storage
           .from(BUCKET)
-          .download(path);
+          .download(paths[i]);
         if (error || !data)
           throw new Error(
             "PDF 다운로드에 실패했습니다. 네트워크를 확인하고 자료를 다시 선택해 주세요.",
           );
-        parts.push(data);
-      }
+        return data;
+      });
       const file = new File(parts, info.name, {
         type: sourceMime(info.name),
         lastModified: info.modified,

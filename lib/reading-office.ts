@@ -1,4 +1,4 @@
-import { documentXml, localPart, readDocumentZip } from "./document-archive";
+import { documentXml, localPart, openDocumentZip } from "./document-archive";
 import type { ReadingBlock } from "./reading";
 const W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
 const R = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
@@ -11,9 +11,93 @@ export async function readOffice(
   urls: string[],
   progress: (n: number) => void,
 ): Promise<ReadingBlock[]> {
-  const files = await readDocumentZip(bytes, progress);
+  // Follow document relationships rather than guessing image directories.
+  // Unused fonts, thumbnails, styles and revision data stay compressed.
+  const archive = await openDocumentZip(bytes),
+    files = archive.files;
+  const xmlCache = new Map<string, Document>();
+  const xmlFile = (name: string) => {
+    if (!xmlCache.has(name)) xmlCache.set(name, documentXml(files.get(name)));
+    return xmlCache.get(name)!;
+  };
   const images = new Map<string, string>(),
     imageUrls = new Map<string, string>();
+  if (kind === "docx") {
+    for (const part of [
+      "[Content_Types].xml",
+      "word/document.xml",
+      "word/_rels/document.xml.rels",
+    ])
+      await archive.read(part);
+    if (
+      files.has("word/document.xml") &&
+      files.has("word/_rels/document.xml.rels")
+    ) {
+      const root = xmlFile("word/document.xml");
+      const used = new Set([
+        ...descendants(root, "blip").map((node) =>
+          node.getAttributeNS(R, "embed"),
+        ),
+        ...descendants(root, "imagedata").map((node) =>
+          node.getAttributeNS(R, "id"),
+        ),
+      ]);
+      for (const rel of descendants(
+        xmlFile("word/_rels/document.xml.rels"),
+        "Relationship",
+      )) {
+        if (
+          !used.has(rel.getAttribute("Id")) ||
+          rel.getAttribute("TargetMode") === "External"
+        )
+          continue;
+        const part = localPart(
+          "word/document.xml",
+          rel.getAttribute("Target") || "",
+        );
+        if (part && archive.names.has(part))
+          images.set(rel.getAttribute("Id")!, part);
+      }
+    }
+  } else {
+    await archive.read("Contents/content.hpf");
+    if (files.has("Contents/content.hpf")) {
+      const manifest = new Map<string, string>();
+      for (const item of descendants(xmlFile("Contents/content.hpf"), "item")) {
+        const part = localPart(
+          "Contents/content.hpf",
+          item.getAttribute("href") || "",
+        );
+        if (part && archive.names.has(part))
+          manifest.set(item.getAttribute("id") || "", part);
+      }
+      const ordered = descendants(xmlFile("Contents/content.hpf"), "itemref")
+        .map((item) => manifest.get(item.getAttribute("idref") || ""))
+        .filter(
+          (path): path is string => !!path && /section\d+\.xml$/i.test(path),
+        );
+      const sections = ordered.length
+        ? ordered
+        : [...archive.names]
+            .filter((name) => /^Contents\/section\d+\.xml$/i.test(name))
+            .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+      for (const part of sections) {
+        await archive.read(part);
+        for (const img of descendants(xmlFile(part), "img")) {
+          const id = img.getAttribute("binaryItemIDRef") || "",
+            target = manifest.get(id);
+          if (target) images.set(id, target);
+        }
+      }
+    }
+  }
+  progress(35);
+  const pictureParts = [...new Set(images.values())];
+  let loaded = 0;
+  for (const part of pictureParts) {
+    await archive.read(part);
+    progress(35 + Math.round((++loaded / pictureParts.length) * 40));
+  }
   let imageBytes = 0,
     nodes = 0;
   const image = (id: string): ReadingBlock => {
@@ -174,7 +258,10 @@ export async function readOffice(
       );
     const rel = files.get("word/_rels/document.xml.rels");
     if (rel)
-      for (const r of descendants(documentXml(rel), "Relationship")) {
+      for (const r of descendants(
+        xmlFile("word/_rels/document.xml.rels"),
+        "Relationship",
+      )) {
         if (r.getAttribute("TargetMode") === "External") continue;
         const part = localPart(
           "word/document.xml",
@@ -183,7 +270,7 @@ export async function readOffice(
         if (part && files.has(part))
           images.set(r.getAttribute("Id") || "", part);
       }
-    const root = documentXml(files.get("word/document.xml"));
+    const root = xmlFile("word/document.xml");
     const body = descendants(root, "body")[0];
     if (!body) throw new Error("Word 본문을 찾지 못했습니다.");
     return container(body, 0);
@@ -192,7 +279,7 @@ export async function readOffice(
     throw new Error(
       "한글 HWPX 문서가 아닙니다. 한글에서 HWPX 또는 PDF로 저장해 주세요.",
     );
-  const content = documentXml(files.get("Contents/content.hpf"));
+  const content = xmlFile("Contents/content.hpf");
   const parts = new Map<string, string>();
   for (const item of descendants(content, "item")) {
     const path = localPart(
@@ -214,6 +301,6 @@ export async function readOffice(
         .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
   if (!sections.length) throw new Error("한글 문서의 본문을 찾지 못했습니다.");
   return sections.flatMap((path) =>
-    container(documentXml(files.get(path)).documentElement, 0),
+    container(xmlFile(path).documentElement, 0),
   );
 }

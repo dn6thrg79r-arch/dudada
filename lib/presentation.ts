@@ -13,7 +13,10 @@ export type PresentationDocument = {
 };
 // Read the central directory before decompression; never trust a renamed .zip or
 // let a tiny compressed upload expand without a bound in an iPad browser.
-export function scanPptxArchive(buffer: ArrayBuffer) {
+export function scanPptxArchive(
+  buffer: ArrayBuffer,
+  onEntry?: (name: string, method: number) => void,
+) {
   const v = new DataView(buffer);
   let end = -1;
   for (
@@ -80,6 +83,7 @@ export function scanPptxArchive(buffer: ArrayBuffer) {
     if (/\.(mp4|mov|mp3|wav|wmv|avi|webm|ogg)$/i.test(name))
       throw new Error("동영상·음성 포함 자료는 PDF로 내보내 불러와 주세요.");
     names.add(name);
+    onEntry?.(name, method);
     total += size;
     if (
       total > MAX_EXPANDED ||
@@ -176,7 +180,10 @@ export async function openPresentation(
     throw new Error("PPTX는 50MB 이하 파일을 선택해 주세요.");
   onProgress(5);
   const original = await file.arrayBuffer();
-  const names = scanPptxArchive(original);
+  const methods = new Map<string, number>();
+  const names = scanPptxArchive(original, (name, method) =>
+    methods.set(name, method),
+  );
   onProgress(10);
   const { default: Zip } = await import("jszip");
   const zip = await Zip.loadAsync(original);
@@ -215,7 +222,11 @@ export async function openPresentation(
       }
       docs.set(name, doc);
       zip.file(name, new XMLSerializer().serializeToString(doc));
-    } else zip.file(name, bytes);
+    } else
+      entry.options.compression = methods.get(name) === 0 ? "STORE" : "DEFLATE";
+    // Unchanged binary entries retain JSZip's original compressed bytes.
+    // Replacing them with inflated data forces every photo to be compressed
+    // again during generation, even though only XML was sanitized.
     onProgress(10 + Math.round((++done / names.size) * 45));
   }
   const presentation = docs.get("ppt/presentation.xml")!,
